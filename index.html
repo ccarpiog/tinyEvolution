@@ -1313,6 +1313,9 @@ class Simulation {
         for (const o of nb) {
           if (o === c || o.age < o.matureAge || o.cooldown > 0 || o.energy < o.maxE * 0.45) continue;
           if (geneDistance(c.g, o.g) > this.params.speciesThreshold * 1.5) continue;
+          // Assortative mating by diet: partners must eat alike. Otherwise rare meat-eating mutants are
+          // bred straight back into the grazer majority and carnivory never takes hold.
+          if (Math.abs(o.g[G.diet] - c.g[G.diet]) > 0.2) continue;
           if (!this.reachable(c.access, k, this.cellAt(o.x, o.y))) continue;
           const d = Math.hypot(o.x - c.x, o.y - c.y);
           if (d < bd) { bd = d; best = o; }

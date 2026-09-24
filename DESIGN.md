@@ -92,6 +92,15 @@ evolve inside a herbivore species before it splits in two. (Before this, carnivo
 single grazer ancestor: 1 of 4 runs in 30 simulated minutes, against 6 of 6 within about 50 minutes now,
 and the grazers + hunters start got more stable too.)
 
+Assortative mating by diet: partners must differ by at most 0.2 in diet. After the bigger, sparser worlds, the
+kinship rule alone stopped working: from a single grazer ancestor, 0 of 4 worlds had any carnivores after 30
+minutes. Omnivore mutants kept mating with the grazer majority, so their offspring drifted back to plant eating.
+Now a meat-leaning lineage breeds among itself (or alone, via the lonely-parthenogenesis fallback). With this
+rule, 8 of 8 single-ancestor worlds grew 20+ carnivores within 30 minutes (first at 4.5–26.5 min, 37–540 by
+30 min), and 3 of 4 random-soup worlds kept carnivores (0 of 4 before). Grazers + hunters worlds were unchanged
+in outcome (hunters persist, no prey collapse). Softer diet-efficiency exponents (1.15 instead of 1.3), letting
+omnivores hunt at 90% hunger and more carrion were also tested: none of them helped much alone.
+
 Body size in combat (`subdueMul()`): a lone predator can hardly bring down prey clearly heavier than itself
 (packmates on the same prey help), and prey much smaller than its attacker often dodges. A failed attack costs
 the attacker more energy the heavier the prey. Together with the extra mass plant eaters can reach, this lets
@@ -112,7 +121,7 @@ Every 2 s, each creature is compared with its species prototype (the mean genome
   it founds a new species, and its old species is recorded as the parent.
 - Splinter groups with fewer than 4 members are re-absorbed.
 - Mating between parents is allowed up to 1.5× the threshold. Fertility fades linearly from 1× to
-  1.5× the threshold (a hybrid zone).
+  1.5× the threshold (a hybrid zone). Partners must also differ by no more than 0.2 in diet (see Kinship).
 - Daughter species get a clearly different colour from their parent. The field notes explain each
   split by the two biggest trait changes.
 - Evolution in place (anagenesis): each species keeps its founding genome (the members' mean during its first
