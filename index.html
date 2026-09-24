@@ -445,7 +445,7 @@ const BIOMES = [
   { key: 'deep', ground: [36, 78, 150], caps: [0, 0, 0, 0], slow: 0.12 },         // ocean: swimmers and fliers only
   { key: 'cliff', ground: [132, 76, 52], caps: [0.08, 0, 0.05, 0], slow: 0.3 },  // mesa walls: climbers and fliers only
   { key: 'mesa', ground: [204, 160, 108], caps: [0.95, 0.75, 0.25, 0.1], slow: 1 }, // lush, untouched plateau top
-  { key: 'shelf', ground: [222, 212, 178], caps: [0.5, 0, 0, 0], slow: 0.9 },  // exposed sea floor: grass steppe
+  { key: 'shelf', ground: [222, 212, 178], caps: [1.1, 0, 0, 0], slow: 0.9 },  // exposed sea floor: fresh grass steppe
 ];
 const B = Object.fromEntries(BIOMES.map((b, i) => [b.key, i]));
 
@@ -473,14 +473,16 @@ function landBiome(T, m) {
   return B.grassland;
 }
 
-const WORLD_SIZES = { Small: [1600, 1060], Medium: [2400, 1600], Large: [3200, 2140], Huge: [4800, 3200] };
+const WORLD_SIZES = { Small: [1600, 1060], Medium: [3200, 2140], Large: [4800, 3200], Huge: [7200, 4800] };
+/** Plant cover per unit of ground: sparse enough that animals have room around them (population follows food). */
+const PLANT_DENSITY = 0.45;
 const CELL = 16;                 // Plant grid cell size (world units)
 const HASH_CELL = 40;            // Spatial hash cell size
 const SIM_DT = 1 / 30;           // Fixed simulation timestep (seconds)
 const THINK_EVERY = 0.25;        // Seconds between decisions per creature
 const SPECIES_EVERY = 2;         // Seconds between species clustering passes
 const SAMPLE_EVERY = 1;          // Seconds between history samples
-const SEASON_LENGTH = 120;       // Seconds per full year
+const SEASON_LENGTH = 160;       // Seconds per full year
 const HISTORY_MAX = 1800;        // Stored history samples
 const MAX_CORPSES = 700;
 const MAX_NEIGHBOURS = 48;       // Neighbours examined per decision
@@ -588,7 +590,7 @@ function derive(c) {
   c.vision = 25 + 90 * g[G.sense];
   c.staminaMax = 1 + 7 * g[G.endurance];
   const d = g[G.diet];
-  c.maxE = 60 * c.m * (0.7 + 0.6 * g[G.endurance]) * (1 + 0.8 * d * d); // meat eaters gorge
+  c.maxE = 72 * c.m * (0.7 + 0.6 * g[G.endurance]) * (1 + 0.8 * d * d); // meat eaters gorge
   c.plantEff = (1 - d) ** 1.3;
   c.meatEff = d ** 1.3;
   c.atk = sm * (0.25 + 1.25 * g[G.strength]);
@@ -633,7 +635,7 @@ function derive(c) {
   c.topt = 0.9 - 1.8 * g[G.coat];                         // preferred temperature: thick coat = cold
   c.litter = 1 + Math.floor(g[G.fertility] * 4.99);
   c.babyFrac = 0.8 - 0.5 * g[G.fertility];                // r/K trade-off: many weak babies or few strong ones
-  c.basal = 0.75 * m75 * (1 + 0.5 * g[G.strength] + 0.45 * g[G.armor] + 0.4 * g[G.sense]
+  c.basal = 0.6 * m75 * (1 + 0.5 * g[G.strength] + 0.45 * g[G.armor] + 0.4 * g[G.sense]
     + 0.3 * g[G.endurance] + 0.3 * g[G.camo] + 0.3 * g[G.speed]
     + 0.12 * sw + 0.15 * cl + 0.45 * g[G.wings]) * (1 - 0.3 * d); // meat-eaters digest cheaply
   c.matureAge = 14 + 8 * sm + 4 * g[G.armor];
@@ -776,11 +778,13 @@ class Simulation {
     this.plants = [];
     this.caps = [];
     for (let k = 0; k < NP; k++) { this.plants.push(new Float32Array(n)); this.caps.push(new Float32Array(n)); }
-    const elev = makeNoise(this.rng, 420, 4);
-    const moist = makeNoise(this.rng, 360, 4);
-    const warp = makeNoise(this.rng, 500, 3);
-    const river = makeNoise(this.rng, 700, 3);
-    const patch = makeNoise(this.rng, 60, 2);
+    // Geography grows with the map, so a big world has big continents and oceans (not just more of them)
+    const f = this.featureScale = Math.max(0.8, Math.sqrt(W * H / (3200 * 2140)));
+    const elev = makeNoise(this.rng, 420 * f, 4);
+    const moist = makeNoise(this.rng, 360 * f, 4);
+    const warp = makeNoise(this.rng, 500 * f, 3);
+    const river = makeNoise(this.rng, 700 * f, 3);
+    const patch = makeNoise(this.rng, 60 * f, 2);
     // Mountains are the highest 8% of the map (a rank, so every seed gets a similar amount)
     const elevAt = new Float32Array(n);
     for (let j = 0; j < this.rows; j++) for (let i = 0; i < this.cols; i++) elevAt[j * this.cols + i] = elev((i + 0.5) * CELL, (j + 0.5) * CELL);
@@ -809,7 +813,7 @@ class Simulation {
       const b = this.biome[k];
       const capB = b === B.deep && this.depth[k] < 0.7 ? B.shelf : b;   // sea floor that may dry out grows grass then
       for (let p = 0; p < NP; p++) {
-        const cap = BIOMES[capB].caps[p] * rich[k];
+        const cap = BIOMES[capB].caps[p] * rich[k] * PLANT_DENSITY;
         if (capB !== b) { this.caps[p][k] = cap; this.plants[p][k] = 0; continue; }
         this.caps[p][k] = cap;
         this.plants[p][k] = cap * (0.4 + 0.5 * this.rng());
@@ -852,11 +856,12 @@ class Simulation {
     for (let oi = 0; oi < nOcean; oi++) {
       const bx = W * (oi + 1) / (nOcean + 1) + (this.rng() - 0.5) * W * 0.08;
       const yS = H * (0.35 + 0.3 * this.rng());                 // the strait sits in the temperate middle
-      const centre = (y) => bx + (warp(bx + 3000, y) - 0.5) * 420;
+      const f = this.featureScale;
+      const centre = (y) => bx + (warp(bx + 3000, y) - 0.5) * 420 * f;
       for (let j = 0; j < this.rows; j++) {
         const y = (j + 0.5) * CELL, xc = centre(y);
-        const hw = 75 + 70 * moist(bx + 5000, y);
-        const dep = 0.25 + 0.75 * clamp(Math.abs(y - yS) / 650, 0, 1);  // shallow near the strait (bridge ≈ 400 wide)
+        const hw = (75 + 70 * moist(bx + 5000, y)) * f;
+        const dep = 0.25 + 0.75 * clamp(Math.abs(y - yS) / (900 * f), 0, 1);  // shallow near the strait (bridge ≈ 550·f wide)
         for (let i = 0; i < cols; i++) {
           const k = j * cols + i, dx = Math.abs((i + 0.5) * CELL - xc);
           if (dx < hw) { this.biome[k] = B.deep; this.depth[k] = dep; }
@@ -868,8 +873,8 @@ class Simulation {
       const nIsland = W >= 4000 ? 2 : 1;
       for (let ii = 0; ii < nIsland; ii++) {
         let y = H * (0.15 + 0.7 * this.rng());
-        if (Math.abs(y - yS) < 350) y = (y + H * 0.5) % (H * 0.85) + H * 0.08;
-        const x = centre(y), ri = (3 + 2.5 * this.rng()) * CELL;
+        if (Math.abs(y - yS) < 350 * f) y = (y + H * 0.5) % (H * 0.85) + H * 0.08;
+        const x = centre(y), ri = (3 + 2.5 * this.rng()) * CELL * f;
         this.stampDisc(x, y, ri + 5.5 * CELL, (k, d) => {
           if (d < ri) {
             const T = this.baseT[k];
@@ -889,10 +894,10 @@ class Simulation {
    */
   raiseMesas(rich) {
     const cols = this.cols, rows = this.rows;
-    const count = Math.max(1, Math.round(this.W * this.H / 2.2e6));
+    const count = Math.max(1, Math.round(this.W * this.H / (2.2e6 * this.featureScale ** 2)));   // mesas grow with the map instead
     let made = 0;
     for (let attempt = 0; attempt < 400 && made < count; attempt++) {
-      const rm = (5 + 3 * this.rng()) * CELL;
+      const rm = (5 + 3 * this.rng()) * CELL * this.featureScale;
       const x = rm + 3 * CELL + this.rng() * (this.W - 2 * rm - 6 * CELL);
       const y = rm + 3 * CELL + this.rng() * (this.H - 2 * rm - 6 * CELL);
       // Only on ordinary dry ground, clear of water, mountains and other features
@@ -1127,7 +1132,7 @@ class Simulation {
     derive(c);
     c.energy = c.maxE * energyFrac;
     c.stamina = c.staminaMax;
-    c.maxAge = (60 + 70 * Math.sqrt(c.m)) * (0.85 + 0.3 * this.rng());
+    c.maxAge = (81 + 95 * Math.sqrt(c.m)) * (0.85 + 0.3 * this.rng());
     return c;
   } // End of spawn()
 
@@ -1281,7 +1286,7 @@ class Simulation {
     if (!c.dispersed && c.age > c.matureAge) {
       c.dispersed = true;
       // Loners leave home more often than herd and pack animals
-      if (this.rng() < 0.5 * (1.3 - 0.8 * soc)) { c.disperseT = 10 + 20 * this.rng(); c.want = this.rng() * Math.PI * 2; }
+      if (this.rng() < 0.5 * (1.3 - 0.8 * soc)) { c.disperseT = 15 + 30 * this.rng(); c.want = this.rng() * Math.PI * 2; }
     } else if (!(c.disperseT > 0) && this.rng() < 0.01) {
       if (kin > 4 + 18 * soc) { c.disperseT = 10 + 10 * this.rng(); c.want = this.rng() * Math.PI * 2; }  // too crowded
     }
@@ -1632,10 +1637,11 @@ class Simulation {
     const p = this.params;
     const dist = dad ? geneDistance(mom.g, dad.g) : 0;
     const T = p.speciesThreshold;
-    // Hybrid zone: fertility fades as parents diverge beyond the species threshold
-    let viability = dist < T ? 1 : clamp(1 - (dist - T) / (T * 0.5), 0, 1);
+    // Hybrid zone: fertility fades as parents diverge beyond the species threshold (failed hybrids still cost)
+    const viability = dist < T ? 1 : clamp(1 - (dist - T) / (T * 0.5), 0, 1);
+    // The population cap is a safety limit, not biology: it prevents conceptions instead of wasting the mother's energy
     const pop = this.creatures.length + this.newborns.length;
-    if (pop > p.maxPop * 0.8) viability *= clamp((p.maxPop - pop) / (p.maxPop * 0.2), 0, 1);
+    const room = pop > p.maxPop * 0.8 ? clamp((p.maxPop - pop) / (p.maxPop * 0.2), 0, 1) : 1;
     const budget = mom.energy - mom.maxE * 0.3;
     if (budget <= 0) return;
     let born = 0;
@@ -1655,6 +1661,7 @@ class Simulation {
       const a = this.rng() * Math.PI * 2;
       const baby = this.spawn(g, clamp(mom.x + Math.cos(a) * mom.r, 2, this.W - 2), clamp(mom.y + Math.sin(a) * mom.r, 2, this.H - 2), 0, mom);
       if (dad && dad.gen >= mom.gen) baby.gen = dad.gen + 1;
+      if (this.rng() > room) continue;                                         // no room: not conceived
       const e = baby.maxE * mom.babyFrac;
       if (born > 0 && (born + 1) * e * 1.2 > budget) break;
       mom.energy -= e * 1.2;

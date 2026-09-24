@@ -39,8 +39,9 @@ Every trait has a cost, so no single "best creature" exists. Derived values are 
 - Continents: one (Small/Medium) or two (Large/Huge) meandering north–south oceans of deep water split
   the land, so each continent evolves on its own. Every continent gets its share of the founding herds and
   hunter packs. Each ocean has a shallow strait in the temperate middle of the map. When the sea drops (a
-  5-minute ice age, or the Climate slider far on the cold side), the strait dries into a land bridge about 400
-  units wide that anyone can walk across, and grass steppe grows on it (dry sea floor has its own grass cap).
+  5-minute ice age, or the Climate slider far on the cold side), the strait dries into a land bridge about 550
+  units wide (× the feature scale) that anyone can walk across, and rich grass steppe grows on it (dry sea floor
+  has its own, higher grass cap, which draws grazers across).
   The field notes say when bridges open and close, and creatures stranded when the sea rises must swim or drown.
 - Barriers: deep ocean needs a good swimmer (swim ≥ 0.5) or a strong flier (flight ≥ 0.5, a long crossing);
   cliffs need a good climber (climb ≥ 0.55) or a decent flier (flight ≥ 0.35). Walkers slide along the edge instead of stepping in. The map's connected
@@ -48,7 +49,15 @@ Every trait has a cost, so no single "best creature" exists. Derived values are 
   nobody chases food, mates or prey it cannot reach.
 - Islands (in each ocean, ringed by deep water) and mesas (plateaus ringed by two-cell-thick red-brown cliffs)
   have rich, untouched plant cover: empty niches that reward the first swimmers, climbers or fliers.
-- World sizes: Small, Medium, Large (default) and Huge (4800 × 3200).
+- World sizes: Small (1600 × 1060), Medium (3200 × 2140), Large (4800 × 3200, default) and Huge (7200 × 4800).
+  Geography scales with the map (noise scales, ocean width and meander, strait length, island and mesa radii
+  grow with `featureScale` = √(area / 3200·2140)), so big worlds have big continents rather than more of them.
+- Plant cover is sparse (`PLANT_DENSITY` 0.45 of the biome caps), so a big world does not simply fill up with
+  more animals: populations follow food, and herds have open ground around them. Animals live longer and
+  starve less quickly than they used to (basal metabolism ×0.8, reserves ×1.2, lifespan ×1.35, a 160 s year),
+  which keeps the thinner populations stable. (Changing only the map and the plant density left the lowest
+  herbivore counts at 68–225 and made an early ice age drop worlds to 39–159 animals; with the energy changes
+  they are back to 239–424, and an early ice age leaves 142–491.)
 - Walking speed on each biome is per creature (`terrainMul` in `derive()`); hunters compare speeds on
   the ground each animal is standing on.
 - Four plants with logistic regrowth, each with its own temperature niche:
@@ -72,7 +81,7 @@ The priority order is:
 4. Otherwise wander, prowl (meat-eaters) or drift toward a comfortable temperature.
 
 Dispersal (checked after fleeing, before mating): half of all young adults, on maturing, walk in a straight
-line for 10–30 s (loners more often, social animals less), and crowded creatures leave too: each decision has
+line for 15–45 s (loners more often, social animals less), and crowded creatures leave too: each decision has
 a 1% chance to go when more than 4 + 18·social kin are in sight, so loners quit crowds within tens of seconds. They stop if they get
 hungry. Without it animals only circled their birthplace, and no creature crossed a land bridge in tests;
 with it, a typical ice age sends a handful to a few dozen founders (with their offspring) to another continent.
@@ -92,7 +101,8 @@ test worlds. Fleeing prey barely recovers stamina, so enduring hunters can run i
 
 Stabilisers:
 - Predators are territorial: they won't breed with more than 3 rival meat-eaters in sight.
-- A soft population cap lowers baby viability.
+- A soft population cap prevents conceptions above 80% of the cap (without costing the mother energy; only
+  failed hybrids cost her).
 - Juveniles and the elderly are slower and weaker, so predators have an easier food source.
 
 ## Species
