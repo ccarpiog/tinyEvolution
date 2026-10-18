@@ -119,6 +119,10 @@
   .btn:disabled { opacity: 0.45; cursor: default; }
   .traits span.v { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .ebar { height: 8px; border: 1.5px solid var(--ink); border-radius: 3px; overflow: hidden; background: #fff; }
+  .menu { display: grid; grid-template-columns: auto 1fr; gap: 2px 6px; align-items: center; font-size: 11px; font-weight: 800; }
+  .menu-bar { height: 10px; border: 1.5px solid var(--ink); border-radius: 3px; overflow: hidden; display: flex; background: #fff; }
+  .menu-bar > i { height: 100%; flex: none; }
+  .menu small { grid-column: 1 / -1; color: var(--muted); font-weight: 700; font-size: 10.5px; }
   .ebar > div { height: 100%; background: var(--herb); }
   #stats.compact .collapsible { display: none !important; }
 
@@ -239,6 +243,7 @@
   <div class="collapsible chart-head">
     <div class="seg" role="group" data-i18n-aria="chartType" aria-label="Chart type">
       <button data-chart="pop" class="on" data-i18n="chartPop">Population</button>
+      <button data-chart="diet" data-i18n="chartDiet">Diets</button>
       <button data-chart="traits" data-i18n="chartTraits">Traits</button>
       <button data-chart="morpho" data-i18n="chartMorpho">Morphospace</button>
       <button data-chart="tree" data-i18n="chartTree">Tree</button>
@@ -260,6 +265,7 @@
       <div><b id="spName"></b><span id="spMeta" class="meta"></span></div>
     </div>
     <div id="spFacts" class="facts"></div>
+    <div class="menu"><span data-i18n="dietTitle">Eats</span><div id="spMenuBar" class="menu-bar"></div><small id="spMenuTxt"></small></div>
     <div class="sel-btns">
       <button id="spFollow" class="btn" data-i18n="spFollow">Follow one</button>
       <button id="spIntro" class="btn alt" data-i18n="cloneTool">Introduce copies…</button>
@@ -274,6 +280,7 @@
       <div><b id="selName"></b><span id="selMeta" class="meta"></span></div>
     </div>
     <div class="ebar" data-i18n-title="energy" title="Energy"><div id="selBar"></div></div>
+    <div class="menu"><span data-i18n="dietTitle">Eats</span><div id="selMenuBar" class="menu-bar"></div><small id="selMenuTxt"></small></div>
     <div class="sel-btns">
       <button id="selFollow" class="btn" data-i18n="follow">Follow</button>
       <button id="selSpecies" class="btn alt" data-i18n="selSpecies">Highlight species</button>
@@ -416,36 +423,47 @@ const GENE_WEIGHTS = Float32Array.from(GENES.map((k) => (
 /** Distance normaliser: a full-range difference in about five genes reads as distance 1. */
 const GENE_WEIGHT_SUM = 5;
 
-// ---------- Plants & biomes ----------
+// ---------- Food & biomes ----------
 /**
- * Plant types. energy = energy per unit of biomass; growth = logistic rate per second;
- * tough = how much jaw strength is needed; toxic = poisonous unless specialised;
- * thorns = energy damage per unit eaten (reduced by armor); topt/trange = temperature niche;
- * seasonal = how much growth drops in winter.
+ * Food that grows on the map grid: four plants (each digested through its own share of the gut) and two
+ * kinds of small animal prey (bugs and fish, digested like meat; no hunting needed, so they are the first
+ * step from plant eating towards meat eating). energy = energy per unit of biomass; growth = logistic rate
+ * per second; fiber = how hard the plant is on a meat eater's gut (digestion falls as (1 - diet) ^ fiber: grass
+ * needs a fermenting gut, ripe berries suit omnivores too); bulk = how much better a big gut digests it (big grazers
+ * live on poor, fibrous forage; small animals need richer food); tough = how much jaw strength is needed; toxic = poisonous
+ * unless the gut is specialised;
+ * thorns = share of the energy lost to thorns (armour protects); topt/trange = temperature niche;
+ * seasonal = how much growth drops in winter; animal = small prey (meat); aquatic = lives in water.
  */
-const PLANTS = [
-  { key: 'grass', color: [132, 206, 74], energy: 30, growth: 0.07, tough: 0.05, toxic: 0, thorns: 0, topt: 0.0, trange: 1.5, seasonal: 0.35 },
-  { key: 'berry', reach: true, color: [222, 62, 146], energy: 75, growth: 0.035, tough: 0.25, toxic: 0, thorns: 0, topt: 0.05, trange: 1.0, seasonal: 1.0 },
-  { key: 'cactus', color: [46, 168, 150], energy: 60, growth: 0.022, tough: 0.8, toxic: 0, thorns: 22, topt: 0.8, trange: 0.9, seasonal: 0.1 },
-  { key: 'fern', color: [128, 84, 206], energy: 60, growth: 0.055, tough: 0.15, toxic: 1, thorns: 0, topt: -0.25, trange: 1.1, seasonal: 0.25 },
+const FOODS = [
+  { key: 'grass', fiber: 1.5, bulk: 0.6, color: [132, 206, 74], energy: 30, growth: 0.07, tough: 0.05, toxic: 0, thorns: 0, topt: 0.0, trange: 1.5, seasonal: 0.35 },
+  { key: 'berry', fiber: 0.5, bulk: 0, reach: true, color: [222, 62, 146], energy: 75, growth: 0.035, tough: 0.25, toxic: 0, thorns: 0, topt: 0.05, trange: 1.0, seasonal: 1.0 },
+  { key: 'cactus', fiber: 1.2, bulk: 0.3, color: [46, 168, 150], energy: 60, growth: 0.022, tough: 0.6, toxic: 0, thorns: 0.45, topt: 0.8, trange: 0.9, seasonal: 0.1 },
+  { key: 'fern', fiber: 1.2, bulk: 0.2, color: [128, 84, 206], energy: 60, growth: 0.055, tough: 0.15, toxic: 1, thorns: 0, topt: -0.25, trange: 1.1, seasonal: 0.25 },
+  { key: 'bugs', animal: true, color: [96, 66, 44], energy: 40, growth: 0.06, tough: 0, toxic: 0, thorns: 0, topt: 0.3, trange: 1.4, seasonal: 0.9 },
+  { key: 'fish', animal: true, aquatic: true, color: [104, 160, 206], energy: 65, growth: 0.045, tough: 0, toxic: 0, thorns: 0, topt: 0.0, trange: 1.8, seasonal: 0.3 },
 ];
-const NP = PLANTS.length;
+const NP = 4;                    // Plant kinds (the first four foods), each with a gut-share gene
+const NF = FOODS.length;         // All grid foods
+const F_BUGS = 4, F_FISH = 5;
+/** What a creature has eaten (energy): one slot per grid food, then prey it (or its pack) killed, then carrion. */
+const ATE_PREY = NF, ATE_CARRION = NF + 1, ATE_N = NF + 2;
 
-/** Biomes: ground colour, plant carrying capacity per plant type, and walking speed factor. */
+/** Biomes: ground colour, carrying capacity per food type (grass, berry, cactus, fern, bugs, fish), walking speed factor. */
 const BIOMES = [
-  { key: 'water', ground: [74, 138, 204], caps: [0, 0, 0, 0], slow: 0.35 },
-  { key: 'tundra', ground: [226, 232, 238], caps: [0.4, 0.12, 0, 0.1], slow: 0.85 },
-  { key: 'grassland', ground: [196, 206, 128], caps: [1, 0.22, 0, 0.08], slow: 1 },
-  { key: 'forest', ground: [120, 140, 88], caps: [0.35, 0.85, 0, 0.55], slow: 0.85 },
-  { key: 'marsh', ground: [110, 134, 124], caps: [0.45, 0.15, 0, 1], slow: 0.7 },
-  { key: 'savanna', ground: [218, 196, 128], caps: [0.75, 0.12, 0.35, 0], slow: 1 },
-  { key: 'desert', ground: [234, 210, 158], caps: [0.06, 0, 0.9, 0], slow: 0.9 },
-  { key: 'mountain', ground: [152, 140, 128], caps: [0.35, 0, 0, 0.12], slow: 0.5 },
+  { key: 'water', ground: [74, 138, 204], caps: [0, 0, 0, 0, 0, 0.5], slow: 0.35 },
+  { key: 'tundra', ground: [226, 232, 238], caps: [0.4, 0.12, 0, 0.1, 0.1, 0], slow: 0.85 },
+  { key: 'grassland', ground: [196, 206, 128], caps: [1, 0.22, 0, 0.08, 0.2, 0], slow: 1 },
+  { key: 'forest', ground: [120, 140, 88], caps: [0.35, 0.85, 0, 0.55, 0.35, 0], slow: 0.85 },
+  { key: 'marsh', ground: [110, 134, 124], caps: [0.45, 0.15, 0, 1, 0.35, 0.2], slow: 0.7 },
+  { key: 'savanna', ground: [218, 196, 128], caps: [0.75, 0.12, 0.35, 0, 0.3, 0], slow: 1 },
+  { key: 'desert', ground: [234, 210, 158], caps: [0.06, 0, 0.9, 0, 0.1, 0], slow: 0.9 },
+  { key: 'mountain', ground: [152, 140, 128], caps: [0.35, 0, 0, 0.12, 0.08, 0], slow: 0.5 },
   // Barriers and what lies behind them
-  { key: 'deep', ground: [36, 78, 150], caps: [0, 0, 0, 0], slow: 0.12 },         // ocean: swimmers and fliers only
-  { key: 'cliff', ground: [132, 76, 52], caps: [0.08, 0, 0.05, 0], slow: 0.3 },  // mesa walls: climbers and fliers only
-  { key: 'mesa', ground: [204, 160, 108], caps: [0.95, 0.75, 0.25, 0.1], slow: 1 }, // lush, untouched plateau top
-  { key: 'shelf', ground: [222, 212, 178], caps: [1.1, 0, 0, 0], slow: 0.9 },  // exposed sea floor: fresh grass steppe
+  { key: 'deep', ground: [36, 78, 150], caps: [0, 0, 0, 0, 0, 0.2], slow: 0.12 },        // ocean: swimmers and fliers only
+  { key: 'cliff', ground: [132, 76, 52], caps: [0.08, 0, 0.05, 0, 0.03, 0], slow: 0.3 },  // mesa walls: climbers and fliers only
+  { key: 'mesa', ground: [204, 160, 108], caps: [0.95, 0.75, 0.25, 0.1, 0.25, 0], slow: 1 }, // lush, untouched plateau top
+  { key: 'shelf', ground: [222, 212, 178], caps: [1.1, 0, 0, 0, 0.1, 0], slow: 0.9 },  // exposed sea floor: fresh grass steppe
 ];
 const B = Object.fromEntries(BIOMES.map((b, i) => [b.key, i]));
 
@@ -474,9 +492,35 @@ function landBiome(T, m) {
 }
 
 const WORLD_SIZES = { Small: [1600, 1060], Medium: [3200, 2140], Large: [4800, 3200], Huge: [7200, 4800] };
+/**
+ * Kinds of world. oceans = carve north–south oceans between continents; sea = share of the map that is open
+ * sea (archipelago: islands everywhere, ringed by deep water with shallow shelves that dry in ice ages);
+ * temp/moist = shift of the climate and of the rainfall; river = how wide (and many) the rivers are.
+ */
+const WORLD_TYPES = {
+  continents: { oceans: true, sea: 0, temp: 0, moist: 0, river: 0.009 },
+  pangaea: { oceans: false, sea: 0, temp: 0, moist: 0, river: 0.009 },
+  archipelago: { oceans: false, sea: 0.42, temp: 0.05, moist: 0.04, river: 0.004 },
+  wetlands: { oceans: true, sea: 0, temp: 0.05, moist: 0.14, river: 0.016 },
+  drylands: { oceans: true, sea: 0, temp: 0.25, moist: -0.16, river: 0.005 },
+  frozen: { oceans: true, sea: 0, temp: -0.45, moist: 0, river: 0.009 },
+};
 /** Plant cover per unit of ground: sparse enough that animals have room around them (population follows food). */
 const PLANT_DENSITY = 0.45;
 const CELL = 16;                 // Plant grid cell size (world units)
+const FOOD_BLOCK = 8;            // Food-map block size in plant cells (8 × 16 = 128 world units)
+const SHELF_DEPTH = 0.6;         // Sea floor shallower than this dries out when the sea drops all the way (see updateEffects())
+const BIRTH_RESERVE = 0.15;      // Share of her reserves a mother always keeps after giving birth
+const BIRTH_COST = 1.1;          // Energy a mother spends per unit of energy her baby starts with
+const FOUNDER_SPREAD = 0.07;     // Genetic variation (standard deviation per gene) within a founding herd
+const BITE = 0.2;                // Food biomass eaten per second by a body of mass 1 (faster eating made small bodies win everywhere: see DESIGN.md)
+const REGROWTH = 0.55;           // Global multiplier on food regrowth (sets how many animals the world feeds)
+const PLANT_EXP = 1.2;           // Overall plant digestion (1 - diet) ^ PLANT_EXP, shown by the belly badge (each plant has its own fiber)
+const MEAT_EXP = 0.65;           // Meat digestion = diet ^ MEAT_EXP (bugs, fish, carrion and prey)
+const HUNT_DIET = 0.3;           // Diet gene from which a creature hunts live prey
+const LEAN_CARCASS = 0.1;        // Meat left by natural deaths, relative to a fresh kill
+const MEAT_UPKEEP = 0;           // Upkeep discount for a full meat eater (0.3 made carnivores outnumber their prey)
+const SCAVENGE_DIET = 0.15;      // Diet gene from which a creature eats carcasses
 const HASH_CELL = 40;            // Spatial hash cell size
 const SIM_DT = 1 / 30;           // Fixed simulation timestep (seconds)
 const THINK_EVERY = 0.25;        // Seconds between decisions per creature
@@ -490,7 +534,7 @@ const SLIDE_ANGLES = [0.6, -0.6, 1.2, -1.2, 1.8, -1.8];   // Turns tried when a 
 
 const DEFAULT_PARAMS = {
   // World (applied on restart)
-  worldSize: 'Large', seed: 7, scenario: 'twoFounders', startCount: 480,
+  worldSize: 'Large', worldType: 'continents', seed: 9, scenario: 'twoFounders', startCount: 480,
   // Evolution
   mutationRate: 0.3, mutationSize: 0.08, speciesThreshold: 0.35, sexual: true,
   // Environment
@@ -505,8 +549,8 @@ const DEFAULT_PARAMS = {
 const FOUNDERS = {
   grazer: { size: 0.3, speed: 0.35, strength: 0.15, armor: 0.1, endurance: 0.3, sense: 0.35, camo: 0.2, diet: 0.05,
     grass: 0.8, berry: 0.35, cactus: 0.05, fern: 0.05, coat: 0.5, fertility: 0.5, swim: 0.1, climb: 0.15, wings: 0, social: 0.6, stalk: 0.2, hue: 0.33 },
-  hunter: { size: 0.5, speed: 0.55, strength: 0.55, armor: 0.1, endurance: 0.45, sense: 0.55, camo: 0.3, diet: 0.88,
-    grass: 0.4, berry: 0.4, cactus: 0.1, fern: 0.1, coat: 0.5, fertility: 0.3, swim: 0.1, climb: 0.15, wings: 0, social: 0.4, stalk: 0.4, hue: 0.02 },
+  hunter: { size: 0.5, speed: 0.55, strength: 0.55, armor: 0.1, endurance: 0.35, sense: 0.45, camo: 0.2, diet: 0.88,
+    grass: 0.4, berry: 0.4, cactus: 0.1, fern: 0.1, coat: 0.5, fertility: 0.4, swim: 0.1, climb: 0.15, wings: 0, social: 0.4, stalk: 0.4, hue: 0.02 },
 };
 
 /**
@@ -590,9 +634,13 @@ function derive(c) {
   c.vision = 25 + 90 * g[G.sense];
   c.staminaMax = 1 + 7 * g[G.endurance];
   const d = g[G.diet];
-  c.maxE = 72 * c.m * (0.7 + 0.6 * g[G.endurance]) * (1 + 0.8 * d * d); // meat eaters gorge
-  c.plantEff = (1 - d) ** 1.3;
-  c.meatEff = d ** 1.3;
+  c.bodyE = 72 * c.m * (0.7 + 0.6 * g[G.endurance]);    // reserves of the body itself (sets what a baby costs)
+  c.maxE = c.bodyE * (1 + 0.8 * d * d);                   // meat eaters gorge
+  // Plant guts are specialised (cellulose needs fermenting), meat is easy to digest for anyone partly carnivorous
+  c.plantEff = (1 - d) ** PLANT_EXP;
+  c.meatEff = d ** MEAT_EXP;
+  c.hunter = d >= HUNT_DIET;                              // hunts live prey (and is feared for it)
+  c.scavenger = d >= SCAVENGE_DIET;                       // bothers with carcasses
   c.atk = sm * (0.25 + 1.25 * g[G.strength]);
   c.def = (sm * (0.3 + 1.5 * g[G.armor]) + 0.35 * c.atk) * (1 - 0.15 * g[G.wings]);  // hollow bones
   // Flight only works for small, lightly armoured bodies; the wings cost upkeep either way
@@ -616,31 +664,45 @@ function derive(c) {
   // climber or a decent flier
   c.access = (sw >= 0.5 || c.fly >= 0.5 ? 1 : 0) | (cl >= 0.55 || c.fly >= 0.35 ? 2 : 0);
   c.detect = 1 - 0.55 * g[G.camo];                        // others notice me at vision * detect
-  c.bite = 0.2 * c.m ** 0.85;                             // plant biomass per second (big mouths are efficient)
+  c.bite = BITE * c.m ** 0.85;                            // food biomass per second (big mouths are efficient)
   // Plant digestion: a fixed "gut budget" shared between plant types (specialists digest better)
   let sum = 0;
   for (let k = 0; k < NP; k++) sum += 0.02 + g[G.grass + k];
-  c.dig = c.dig || new Float32Array(NP);
-  c.rate = c.rate || new Float32Array(NP);
+  c.dig = c.dig || new Float32Array(NF);
+  c.rate = c.rate || new Float32Array(NF);
+  c.gain = c.gain || new Float32Array(NF);
   c.share = c.share || new Float32Array(NP);
   for (let k = 0; k < NP; k++) {
     const share = (0.02 + g[G.grass + k]) / sum;
     c.share[k] = share;
-    let dig = share ** 0.6 * c.plantEff;
-    if (k === 0) dig *= 0.9 + 0.3 * g[G.size];                   // bulk feeders: big guts get more out of grass
-    if (PLANTS[k].toxic) dig -= 0.9 * PLANTS[k].toxic * (1 - Math.min(1, share / 0.35)); // poison unless specialised
+    let dig = share ** 0.6 * (1 - d) ** FOODS[k].fiber;
+    // Bulk feeding (the Jarman–Bell principle): a big, slow gut gets more out of fibrous plants than a small one
+    dig *= clamp(1 + FOODS[k].bulk * (Math.sqrt(c.m) - 0.9), 0.4, 1.4);
+    // Toxins: a gut with a little fern in its budget gets a little out of ferns; specialists detoxify them fully
+    if (FOODS[k].toxic) dig *= Math.min(1, share / 0.35);
     c.dig[k] = dig;
-    c.rate[k] = (1 - PLANTS[k].tough * (1 - g[G.strength])) * (PLANTS[k].reach ? clamp(0.25 + 1.5 * g[G.size], 0, 1) : 1);
-  }
+    // Bushes: tall animals reach the berries, and so do climbers and fliers of any size
+    const reach = FOODS[k].reach ? clamp(0.25 + 1.5 * g[G.size] + 1.0 * cl + 1.2 * c.fly, 0, 1) : 1;
+    c.rate[k] = (1 - FOODS[k].tough * (1 - g[G.strength])) * reach;
+  } // End of the loop over plant kinds
+  // Small prey is digested like meat. Bugs: quick, sharp-eyed animals and fliers catch more; the catch grows
+  // more slowly than body size (∝ m^0.6), so bugs suit small animals best without being a feast for tiny ones. Fish: anyone wading can snatch a few; swimmers (and diving fliers) catch many.
+  c.dig[F_BUGS] = c.dig[F_FISH] = c.meatEff;
+  c.rate[F_BUGS] = c.m ** -0.25 * (0.35 + 0.35 * g[G.sense] + 0.3 * g[G.speed]) * (1 + 0.6 * c.fly);
+  c.rate[F_FISH] = 1.8 * Math.min(1, 0.15 + 1.1 * sw ** 1.2 + 0.7 * c.fly);
+  // Energy per unit eaten (thorns take their share unless armour protects)
+  for (let k = 0; k < NF; k++) c.gain[k] = FOODS[k].energy * c.dig[k] * (1 - FOODS[k].thorns * (1 - g[G.armor]));
   c.topt = 0.9 - 1.8 * g[G.coat];                         // preferred temperature: thick coat = cold
   c.litter = 1 + Math.floor(g[G.fertility] * 4.99);
-  c.babyFrac = 0.8 - 0.5 * g[G.fertility];                // r/K trade-off: many weak babies or few strong ones
-  c.basal = 0.6 * m75 * (1 + 0.5 * g[G.strength] + 0.45 * g[G.armor] + 0.4 * g[G.sense]
+  c.babyFrac = 0.7 - 0.45 * g[G.fertility];               // r/K trade-off: many weak babies or few strong ones
+  // Ready to breed once the first baby is affordable without dipping into the reserve
+  c.breedAt = Math.max(0.5, BIRTH_RESERVE + BIRTH_COST * c.babyFrac * c.bodyE / c.maxE + 0.03);
+  c.basal = 0.75 * m75 * (1 + 0.5 * g[G.strength] + 0.45 * g[G.armor] + 0.4 * g[G.sense]
     + 0.3 * g[G.endurance] + 0.3 * g[G.camo] + 0.3 * g[G.speed]
-    + 0.12 * sw + 0.15 * cl + 0.45 * g[G.wings]) * (1 - 0.3 * d); // meat-eaters digest cheaply
-  c.matureAge = 14 + 8 * sm + 4 * g[G.armor];
-  c.cooldownBase = 9 + 7 * sm;
-  c.meat = 90 * c.m;
+    + 0.12 * sw + 0.15 * cl + 0.45 * g[G.wings]) * (1 - MEAT_UPKEEP * d); // meat is cheap to digest
+  c.matureAge = 11 + 7 * sm + 4 * g[G.armor];
+  c.cooldownBase = 7 + 6 * sm;
+  c.meat = 110 * c.m;
 } // End of derive()
 
 /**
@@ -656,7 +718,7 @@ class SpatialHash {
     this.cellSize = cellSize;
     this.cols = Math.ceil(w / cellSize) + 1;
     this.rows = Math.ceil(h / cellSize) + 1;
-    this.head = new Int32Array(this.cols * this.rows);
+    this.head = new Int32Array(this.cols * this.rows).fill(-1);   // empty until the first rebuild
     this.next = new Int32Array(1024);
     this.items = [];
   }
@@ -733,7 +795,7 @@ class Simulation {
    */
   reset() {
     const p = this.params;
-    const [W, H] = WORLD_SIZES[p.worldSize] || WORLD_SIZES.Large;
+    const [W, H] = Object.hasOwn(WORLD_SIZES, p.worldSize) ? WORLD_SIZES[p.worldSize] : WORLD_SIZES.Large;
     this.W = W; this.H = H;
     this.rng = mulberry32(p.seed | 0);
     this.time = 0;
@@ -761,6 +823,7 @@ class Simulation {
     this.nextSpeciesPass = 0;
     this.plantTimer = 0;
     this.seedFounders();
+    this.note('newWorld', { type: this.worldType });
     this.speciesPass();
     this.record();
   } // End of reset()
@@ -773,64 +836,96 @@ class Simulation {
     this.cols = Math.ceil(W / CELL);
     this.rows = Math.ceil(H / CELL);
     const n = this.cols * this.rows;
+    // Coarse food map: mean biomass of each plant type per block of FOOD_BLOCK × FOOD_BLOCK cells, so hungry
+    // creatures can head for greener pastures beyond their sight (see scoutFood())
+    this.bcols = Math.ceil(this.cols / FOOD_BLOCK);
+    this.brows = Math.ceil(this.rows / FOOD_BLOCK);
+    this.blockOf = new Int32Array(n);
+    for (let j = 0; j < this.rows; j++) {
+      for (let i = 0; i < this.cols; i++) this.blockOf[j * this.cols + i] = Math.floor(j / FOOD_BLOCK) * this.bcols + Math.floor(i / FOOD_BLOCK);
+    }
+    this.foodMap = [];
+    for (let k = 0; k < NF; k++) this.foodMap.push(new Float32Array(this.bcols * this.brows));
+    this.preyMap = new Float32Array(this.bcols * this.brows);   // plant-leaning animals per block (see mapPrey())
+    this.preyTimer = 0;
     this.biome = new Uint8Array(n);
     this.baseT = new Float32Array(n);
-    this.plants = [];
+    this.plants = [];            // biomass per food type (plants, bugs and fish) per cell
     this.caps = [];
-    for (let k = 0; k < NP; k++) { this.plants.push(new Float32Array(n)); this.caps.push(new Float32Array(n)); }
+    for (let k = 0; k < NF; k++) { this.plants.push(new Float32Array(n)); this.caps.push(new Float32Array(n)); }
     // Geography grows with the map, so a big world has big continents and oceans (not just more of them)
     const f = this.featureScale = Math.max(0.8, Math.sqrt(W * H / (3200 * 2140)));
+    // Smaller worlds are lusher per unit of ground, so even a small map feeds enough animals to evolve
+    // (about 700 on Small, 1400 on Medium, 2200 on Large and 3000 on Huge)
+    this.lushness = clamp(Math.sqrt(4800 * 3200 / (W * H)), 0.62, 3);
     const elev = makeNoise(this.rng, 420 * f, 4);
     const moist = makeNoise(this.rng, 360 * f, 4);
     const warp = makeNoise(this.rng, 500 * f, 3);
     const river = makeNoise(this.rng, 700 * f, 3);
     const patch = makeNoise(this.rng, 60 * f, 2);
-    // Mountains are the highest 8% of the map (a rank, so every seed gets a similar amount)
+    // The kind of world ("surprise" picks one from the seed)
+    let typeKey = Object.hasOwn(WORLD_TYPES, this.params.worldType) ? this.params.worldType : null;
+    if (!typeKey) { const keys = Object.keys(WORLD_TYPES); typeKey = keys[Math.floor(this.rng() * keys.length)]; }
+    this.worldType = typeKey;
+    const wt = WORLD_TYPES[typeKey];
+    // Mountains are the highest 8% of the map (a rank, so every seed gets a similar amount); so is the open sea
     const elevAt = new Float32Array(n);
     for (let j = 0; j < this.rows; j++) for (let i = 0; i < this.cols; i++) elevAt[j * this.cols + i] = elev((i + 0.5) * CELL, (j + 0.5) * CELL);
-    const peak = Float32Array.from(elevAt).sort()[Math.floor(n * 0.92)];
+    const sorted = Float32Array.from(elevAt).sort();
+    const peak = sorted[Math.floor(n * 0.92)];
+    const sea = wt.sea ? sorted[Math.floor(n * wt.sea)] : -1;
+    const coast = wt.sea ? sorted[Math.floor(n * (wt.sea + 0.06))] : 0.3;
+    this.depth = new Float32Array(n);
     const rich = new Float32Array(n);
     for (let j = 0; j < this.rows; j++) {
       for (let i = 0; i < this.cols; i++) {
         const x = (i + 0.5) * CELL, y = (j + 0.5) * CELL, k = j * this.cols + i;
         const lat = (y / H) * 2 - 1;                     // -1 north (cold) .. 1 south (hot)
-        const T = lat * 0.95 + (warp(x, y) - 0.5) * 0.8;
+        const T = lat * 0.95 + (warp(x, y) - 0.5) * 0.8 + wt.temp;
         const e = elevAt[k];
         const rv = Math.abs(river(x, y) - 0.5);
         let b, Tc = T;
-        if (e < 0.3 || rv < 0.009) b = B.water;
+        if (e < sea) { b = B.deep; this.depth[k] = 0.2 + 0.8 * clamp((sea - e) / 0.05, 0, 1); }   // open sea (shelves dry in ice ages)
+        else if (e < coast || rv < wt.river) b = B.water;
         else if (e > peak) { b = B.mountain; Tc = T - 0.35 * clamp((e - peak) / 0.08, 0, 1); } // peaks are colder
-        else b = landBiome(T, moist(x, y));
+        else b = landBiome(T, clamp(moist(x, y) + wt.moist, 0, 1));
         this.biome[k] = b;
         this.baseT[k] = Tc;
         rich[k] = 0.65 + 0.6 * patch(x, y);
       }
     } // End of the loops that build the base terrain grid
-    this.carveOceans(warp, moist, rich);
+    this.straits = [];
+    if (wt.oceans) this.carveOceans(warp, moist, rich);
     this.raiseMesas(rich);
-    // Plant cover follows the final biomes
+    // Bugs swarm in patches (termite mounds, rotting logs), so insect eaters have rich spots to find
+    const swarm = makeNoise(this.rng, 90 * f, 2);
+    // Food cover follows the final biomes
     for (let k = 0; k < n; k++) {
       const b = this.biome[k];
-      const capB = b === B.deep && this.depth[k] < 0.7 ? B.shelf : b;   // sea floor that may dry out grows grass then
-      for (let p = 0; p < NP; p++) {
-        const cap = BIOMES[capB].caps[p] * rich[k] * PLANT_DENSITY;
-        if (capB !== b) { this.caps[p][k] = cap; this.plants[p][k] = 0; continue; }
+      // Sea floor that may dry out: fish while it is flooded, the shelf's grass steppe once the sea drops
+      const shelf = b === B.deep && this.depth[k] < SHELF_DEPTH;
+      const bugMul = 0.25 + 1.5 * swarm(((k % this.cols) + 0.5) * CELL, (Math.floor(k / this.cols) + 0.5) * CELL);
+      for (let p = 0; p < NF; p++) {
+        const src = shelf && !FOODS[p].aquatic ? B.shelf : b;
+        const cap = BIOMES[src].caps[p] * rich[k] * PLANT_DENSITY * (p === F_BUGS ? bugMul : 1);
         this.caps[p][k] = cap;
-        this.plants[p][k] = cap * (0.4 + 0.5 * this.rng());
+        this.plants[p][k] = src !== b ? 0 : cap * (0.4 + 0.5 * this.rng());
       }
-    }
+    } // End of the loop that sets the food cover
     this.landCells = [];
     this.oceanCells = [];
+    this.waterCells = [];        // shallow water and open sea: where fish live
     this.capSum = 0;
     for (let k = 0; k < n; k++) {
       const b = this.biome[k];
-      if (b === B.deep) { if (this.depth[k] < 0.7) this.oceanCells.push(k); }
-      else if (b !== B.water) this.landCells.push(k);
+      if (b === B.deep) { this.waterCells.push(k); if (this.depth[k] < SHELF_DEPTH) this.oceanCells.push(k); }
+      else if (b === B.water) this.waterCells.push(k);
+      else this.landCells.push(k);
     }
-    this.growCells = this.landCells;
+    this.setGrowCells(this.landCells.concat(this.waterCells));
     this.computeZones();
     // "Mainland": walkable land on the continents (not islands, mesas or mountain tops); founders start here
-    const z0 = this.zones[0], big = this.landCells.length * 0.05;
+    const z0 = this.zones[0], big = this.landCells.length * 0.02;
     this.mainCells = this.landCells.filter((k) => z0[k] >= 0 && this.zoneSize[0][z0[k]] >= big && this.biome[k] !== B.mountain);
     if (!this.mainCells.length) this.mainCells = this.landCells;
     // The mainland split by continent, so every continent gets its own founders
@@ -850,8 +945,6 @@ class Simulation {
    */
   carveOceans(warp, moist, rich) {
     const W = this.W, H = this.H, cols = this.cols;
-    this.depth = new Float32Array(this.cols * this.rows);
-    this.straits = [];
     const nOcean = W >= 3000 ? 2 : 1;
     for (let oi = 0; oi < nOcean; oi++) {
       const bx = W * (oi + 1) / (nOcean + 1) + (this.rng() - 0.5) * W * 0.08;
@@ -990,22 +1083,40 @@ class Simulation {
    * Notes in the log when land bridges appear or disappear.
    */
   applySeaLevel() {
-    let changed = false;
-    const dry = [];
+    let changed = false, exposed = 0;
     for (const k of this.oceanCells) {
       const b = this.depth[k] < this.seaQ ? B.shelf : B.deep;
-      if (b === B.shelf) dry.push(k);
-      else if (this.biome[k] === B.shelf) for (let p = 0; p < NP; p++) this.plants[p][k] = 0;   // flooded again
-      if (this.biome[k] !== b) { this.biome[k] = b; changed = true; }
+      if (this.biome[k] !== b) {
+        // The sea floor dries out (its fish die) or floods again (its plants and bugs drown)
+        for (let p = 0; p < NF; p++) if (!!FOODS[p].aquatic === (b === B.shelf)) this.plants[p][k] = 0;
+        this.biome[k] = b; changed = true;
+      }
+      if (b === B.shelf) exposed++;
     }
     if (!changed) return;
-    const exposed = dry.length;
-    this.growCells = exposed ? this.landCells.concat(dry) : this.landCells;   // grass colonises the dry sea floor
+    this.setGrowCells(this.growCells);                 // grass colonises the dry sea floor, fish the flooded one
     this.computeZones();
     this.plantsDirty = true;
     if (exposed > 0 && !this.bridged) { this.bridged = true; this.note('bridgeOpen', {}); }
     else if (exposed === 0 && this.bridged) { this.bridged = false; this.note('bridgeClosed', {}); }
   } // End of applySeaLevel()
+
+  /**
+   * Sets the cells where food can grow, and per food type the ones where it actually has room to grow
+   * right now (so the regrowth loop skips cactus outside deserts, fish on land, grass on flooded sea floor...).
+   * @param {number[]} cells - Cells where food grows.
+   */
+  setGrowCells(cells) {
+    this.growCells = cells;
+    this.growLists = [];
+    for (let p = 0; p < NF; p++) {
+      const aquatic = !!FOODS[p].aquatic;
+      this.growLists.push(Int32Array.from(cells.filter((k) => {
+        const b = this.biome[k], sea = b === B.water || b === B.deep;
+        return this.caps[p][k] > 0 && (aquatic ? sea || b === B.marsh : !sea);
+      })));
+    }
+  } // End of setGrowCells()
 
   /**
    * Returns the plant-grid index for a world position.
@@ -1048,20 +1159,41 @@ class Simulation {
   }
 
   /**
+   * Picks a starting spot for a founding herd: of a few random places on a continent, the one whose
+   * temperature suits the herd best (and that has some grass), so founders don't start in a desert or on ice.
+   * @param {number[]} cells - Candidate cells (one continent).
+   * @param {number} topt - The founders' preferred temperature.
+   * @returns {{x:number,y:number}} Position.
+   */
+  homeFor(cells, topt) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < 40; i++) {
+      const pt = this.randomLand(true, cells);
+      const k = this.cellAt(pt.x, pt.y);
+      const d = Math.abs(this.tempAt(k) - topt) + (this.caps[0][k] < 0.1 ? 1 : 0);
+      if (d < bd) { bd = d; best = pt; }
+    }
+    return best || this.randomLand(true, cells);
+  } // End of homeFor()
+
+  /**
    * Places the starting populations according to the chosen scenario.
    */
   seedFounders() {
     const p = this.params;
-    const n = p.startCount | 0;
+    // The starting count is for a Large world; smaller worlds start with fewer founders (they feed fewer animals,
+    // and a full-size founding population grazes a small map bare before the plants can regrow)
+    const n = Math.round((p.startCount | 0) * clamp(Math.sqrt(this.W * this.H / (4800 * 3200)), 0.45, 1.25));
     /**
      * Adds a founder with a lightly jittered genome near a point.
      * @param {Float32Array} base - Founder genome.
      * @param {{x:number,y:number}} at - Group centre.
      * @param {number} spread - Scatter radius.
+     * @param {number} sp - Species the founder starts in (its herd's).
      */
-    const add = (base, at, spread) => {
+    const add = (base, at, spread, sp) => {
       const g = Float32Array.from(base);
-      for (let i = 0; i < NG; i++) g[i] = clamp(g[i] + gaussian(this.rng) * 0.015, 0, 1);
+      for (let i = 0; i < NG; i++) g[i] = clamp(g[i] + gaussian(this.rng) * FOUNDER_SPREAD, 0, 1);   // a founding herd is genetically varied
       const home = this.cellAt(at.x, at.y);
       let x = at.x, y = at.y;
       for (let tries = 0; tries < 8; tries++) {           // scatter, but not into the sea, a cliff or another region
@@ -1070,8 +1202,9 @@ class Simulation {
         if (this.reachable(0, home, this.cellAt(tx, ty))) { x = tx; y = ty; break; }
       }
       const c = this.spawn(g, x, y, 0.8, null);
-      c.age = c.matureAge * (0.6 + this.rng());
+      c.age = c.matureAge * 0.3 + (c.maxAge * 0.55 - c.matureAge * 0.3) * this.rng();   // mixed ages, so they don't all die together
       c.cooldown = this.rng() * c.cooldownBase;
+      c.sp = sp;
       this.creatures.push(c);
     };
     if (p.scenario === 'random') {
@@ -1086,23 +1219,25 @@ class Simulation {
       }
     } else {
       const grazer = genomeFrom(FOUNDERS.grazer);
+      const spG = this.newSpecies(grazer, 0).id;            // each founding stock starts as one species
       const groups = 8;
       const hunters = p.scenario === 'twoFounders' ? Math.round(n * 0.07) : 0;
       const herds = [];
       for (let gIdx = 0; gIdx < groups; gIdx++) {
-        const at = this.randomLand(true, this.continents[gIdx % this.continents.length]);   // spread over continents
+        const at = this.homeFor(this.continents[gIdx % this.continents.length], 0);   // spread over continents
         herds.push(at);
-        for (let i = 0; i < Math.floor((n - hunters) / groups); i++) add(grazer, at, 60);
+        for (let i = 0; i < Math.floor((n - hunters) / groups); i++) add(grazer, at, 60, spG);
       }
       if (hunters) {
         // Hunter packs start near (but not inside) a few of the herds
         const hunter = genomeFrom(FOUNDERS.hunter);
+        const spH = this.newSpecies(hunter, 0).id;
         const packs = 4;
         for (let pk = 0; pk < packs; pk++) {
           const h = herds[pk];                                   // herds alternate continents, so packs do too
           let at = { x: clamp(h.x + 120, 10, this.W - 10), y: h.y };
           if (!this.reachable(0, this.cellAt(at.x, at.y), this.cellAt(h.x, h.y))) at = h;   // not across the sea
-          for (let i = 0; i < Math.ceil(hunters / packs); i++) add(hunter, at, 40);
+          for (let i = 0; i < Math.ceil(hunters / packs); i++) add(hunter, at, 40, spH);
         }
       }
     } // End of the scenario branches
@@ -1126,13 +1261,13 @@ class Simulation {
       age: 0, energy: 0, stamina: 0, cooldown: 0, attackCd: 0, lonely: 0, thinkT: this.rng() * THINK_EVERY,
       state: 'wander', target: null, targetCell: -1, plantKind: -1, chaseT: 0, giveUpT: 0,
       gen: mother ? mother.gen + 1 : 0, sp: mother ? mother.sp : 0, motherId: mother ? mother.id : 0,
-      children: 0, kills: 0, eatenPlant: 0, eatenMeat: 0, tempMul: 1, ageMul: 0.65, walk: this.rng() * 10, cause: '',
+      children: 0, kills: 0, ate: new Float32Array(ATE_N), tempMul: 1, ageMul: 0.65, walk: this.rng() * 10, cause: '',
       born: this.time, slide: this.rng() < 0.5 ? 1 : -1,
     };
     derive(c);
     c.energy = c.maxE * energyFrac;
     c.stamina = c.staminaMax;
-    c.maxAge = (81 + 95 * Math.sqrt(c.m)) * (0.85 + 0.3 * this.rng());
+    c.maxAge = (60 + 70 * Math.sqrt(c.m)) * (0.85 + 0.3 * this.rng());
     return c;
   } // End of spawn()
 
@@ -1151,6 +1286,8 @@ class Simulation {
 
     this.hash.rebuild(this.creatures);
     this.corpseHash.rebuild(this.corpses);
+    this.preyTimer -= dt;
+    if (this.preyTimer <= 0) { this.preyTimer = 0.5; this.mapPrey(); }
 
     const list = this.creatures;
     for (let i = 0; i < list.length; i++) {
@@ -1177,45 +1314,127 @@ class Simulation {
     const s = this.season();
     const shift = this.params.climate * 0.8 + this.climateShift + s * 0.18;
     const gm = this.params.plantGrowth * this.growthMul * dt;
-    for (let p = 0; p < NP; p++) {
-      const P = PLANTS[p];
-      const arr = this.plants[p], cap = this.caps[p];
+    const blockOf = this.blockOf, perCell = 1 / (FOOD_BLOCK * FOOD_BLOCK);
+    for (let p = 0; p < NF; p++) {
+      const P = FOODS[p];
+      const arr = this.plants[p], cap = this.caps[p], fm = this.foodMap[p];
       const seasonMul = 1 - P.seasonal * (0.5 - 0.5 * s);
-      const rate = P.growth * gm * seasonMul;
-      if (rate <= 0) continue;
-      for (const k of this.growCells) {
+      const rate = Math.max(0, P.growth * REGROWTH * this.lushness * gm * seasonMul);
+      fm.fill(0);
+      for (const k of this.growLists[p]) {
         const c = cap[k];
-        if (c <= 0) continue;
         const dT = (this.baseT[k] + shift - P.topt) / P.trange;
         const tm = 1 - dT * dT;
         const v = arr[k];
-        if (tm <= 0) { if (v > 0) arr[k] = Math.max(0, v - 0.01 * dt); continue; } // too hot/cold: wilts
-        let nv = v + rate * tm * Math.max(v, 0.04) * (1 - v / c);
-        arr[k] = nv > c ? c : nv;
+        if (tm <= 0) { if (v > 0) arr[k] = Math.max(0, v - 0.01 * dt); }   // too hot/cold: wilts
+        else {
+          const nv = v + rate * tm * Math.max(v, 0.04) * (1 - v / c);
+          arr[k] = nv > c ? c : nv;
+        }
+        fm[blockOf[k]] += arr[k] * perCell;              // the coarse food map follows the plants
       }
     } // End of the loop over plant types
     this.plantsDirty = true;
   } // End of growPlants()
 
   /**
-   * Expected energy per second a creature would get from the best plant in a cell.
+   * Expected energy per second a creature would get from the best food (plant, bugs or fish) in a cell.
    * @param {object} c - Creature.
    * @param {number} k - Cell index.
-   * @returns {{v:number, kind:number}} Value and best plant kind (-1 if none).
+   * @returns {{v:number, kind:number, stock:number}} Eating rate, best food kind (-1 if none) and the energy
+   *   that kind holds in the cell.
    */
   plantValue(c, k) {
-    let best = 0, kind = -1;
-    for (let p = 0; p < NP; p++) {
+    let best = 0, kind = -1, stock = 0;
+    for (let p = 0; p < NF; p++) {
       const bio = this.plants[p][k];
-      if (bio < 0.04 || c.dig[p] <= 0) continue;
-      const P = PLANTS[p];
-      const perUnit = P.energy * c.dig[p] - P.thorns * (1 - c.g[G.armor]);
-      if (perUnit <= 0) continue;
-      const v = c.bite * c.rate[p] * perUnit * Math.min(1, bio / 0.3);
-      if (v > best) { best = v; kind = p; }
+      if (bio < 0.04 || c.gain[p] <= 0 || c.rate[p] <= 0) continue;
+      // Eating goes at full speed until the patch is bare; a thin patch just doesn't last (see the stock)
+      const v = c.bite * c.rate[p] * c.gain[p];
+      if (v > best) { best = v; kind = p; stock = (bio - 0.03) * c.gain[p]; }
     }
-    return { v: best, kind };
+    return { v: best, kind, stock };
   } // End of plantValue()
+
+  /**
+   * Looks beyond sight for richer feeding grounds on the coarse food map (animals remember and smell where
+   * food grows), so a hungry herd moves on instead of starving on ground it has grazed bare.
+   * @param {object} c - Creature.
+   * @param {number} k - The creature's cell.
+   * @param {number} minV - Only feeding grounds worth more than this (energy per second, after the walk) count.
+   * @returns {number} A reachable target cell in the best block nearby, or -1.
+   */
+  scoutFood(c, k, minV) {
+    const span = FOOD_BLOCK * CELL;
+    const bx = Math.floor((k % this.cols) / FOOD_BLOCK), by = Math.floor(Math.floor(k / this.cols) / FOOD_BLOCK);
+    let best = -1, bestV = minV;
+    for (let j = by - 2; j <= by + 2; j++) {
+      if (j < 0 || j >= this.brows) continue;
+      for (let i = bx - 2; i <= bx + 2; i++) {
+        if (i < 0 || i >= this.bcols || (i === bx && j === by)) continue;
+        const b = j * this.bcols + i;
+        let v = 0;
+        for (let p = 0; p < NF; p++) {
+          const bio = this.foodMap[p][b];
+          if (bio < 0.02 || c.gain[p] <= 0 || c.rate[p] <= 0) continue;
+          const pv = c.bite * c.rate[p] * c.gain[p] * Math.min(1, bio / 0.3);
+          if (pv > v) v = pv;
+        }
+        v /= 1 + Math.hypot(i - bx, j - by) * span / (c.vmax * 8);   // a long walk is worth less
+        if (v > bestV) { bestV = v; best = b; }
+      }
+    } // End of the loops over nearby blocks
+    if (best < 0) return -1;
+    // Aim at the richest of a few cells in that block that I can actually walk to
+    const i0 = (best % this.bcols) * FOOD_BLOCK, j0 = Math.floor(best / this.bcols) * FOOD_BLOCK;
+    let cell = -1, cv = 0;
+    for (let s = 0; s < 6; s++) {
+      const i = Math.min(this.cols - 1, i0 + Math.floor(this.rng() * FOOD_BLOCK));
+      const j = Math.min(this.rows - 1, j0 + Math.floor(this.rng() * FOOD_BLOCK));
+      const q = j * this.cols + i;
+      if (!this.reachable(c.access, k, q)) continue;
+      const v = this.plantValue(c, q).v;
+      if (v > cv) { cv = v; cell = q; }
+    }
+    return cell;
+  } // End of scoutFood()
+
+  /**
+   * Refreshes the coarse prey map: how many plant-leaning animals are in each food-map block.
+   */
+  mapPrey() {
+    const m = this.preyMap;
+    m.fill(0);
+    for (const c of this.creatures) if (c.alive && c.g[G.diet] < 0.45) m[this.blockOf[this.cellAt(c.x, c.y)]]++;
+  }
+
+  /**
+   * A hungry hunter with nothing in sight follows the scent of herds: picks the nearby block with the most
+   * plant-leaning animals (nearer blocks count more) and returns its centre, or null if prey is right here
+   * (or nowhere nearby) and ordinary prowling should go on.
+   * @param {object} c - Creature.
+   * @param {number} k - The creature's cell.
+   * @returns {{x:number,y:number}|null} Where to head.
+   */
+  scoutPrey(c, k) {
+    const span = FOOD_BLOCK * CELL;
+    const bx = Math.floor((k % this.cols) / FOOD_BLOCK), by = Math.floor(Math.floor(k / this.cols) / FOOD_BLOCK);
+    let best = -1, bestV = 0;
+    for (let j = by - 3; j <= by + 3; j++) {
+      if (j < 0 || j >= this.brows) continue;
+      for (let i = bx - 3; i <= bx + 3; i++) {
+        if (i < 0 || i >= this.bcols) continue;
+        const b = j * this.bcols + i, n = this.preyMap[b];
+        if (n < 1) continue;
+        const v = n / (1 + Math.hypot(i - bx, j - by) * span / (c.vmax * 6));
+        if (v > bestV) { bestV = v; best = b; }
+      }
+    } // End of the loops over nearby blocks
+    if (best < 0 || best === this.blockOf[k]) return null;
+    const x = ((best % this.bcols) + 0.5) * span, y = (Math.floor(best / this.bcols) + 0.5) * span;
+    if (!this.reachable(c.access, k, this.cellAt(x, y))) return null;
+    return { x, y };
+  } // End of scoutPrey()
 
   /**
    * Decision making (runs a few times per second per creature): flee, mate, eat or wander.
@@ -1253,7 +1472,7 @@ class Simulation {
     let fx = 0, fy = 0, threat = 0, nearest = Infinity;
     for (const o of nb) {
       // Kin of similar diet are harmless; a much more carnivorous relative is a threat like any other
-      if (o === c || o.meatEff < 0.25 || (o.sp === c.sp && o.g[G.diet] < c.g[G.diet] + 0.3)) continue;
+      if (o === c || !o.hunter || (o.sp === c.sp && o.g[G.diet] < c.g[G.diet] + 0.3)) continue;
       const dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 0.01;
       const noticed = watch * o.detect * (o.stalking ? 1 - 0.6 * o.g[G.stalk] : 1);
       if (d > noticed) continue;                         // camouflaged or stalking predators are noticed late
@@ -1300,12 +1519,19 @@ class Simulation {
     }
 
     // ---- Reproduction
-    let ready = c.age > c.matureAge && c.cooldown <= 0 && hungerFrac > 0.6;
-    if (ready && c.meatEff > 0.3) {
-      // Territorial predators: no breeding when too many rival meat-eaters are in sight
-      let rivals = 0;
-      for (const o of nb) if (o !== c && o.meatEff > 0.3) rivals += o.sp === c.sp ? 1 - soc : 1;   // packmates tolerated
-      if (rivals > 3) ready = false;
+    let ready = c.age > c.matureAge && c.cooldown <= 0 && hungerFrac > c.breedAt;
+    c.breedOdds = 1;
+    if (ready && c.hunter) {
+      // Predators breed in proportion to the prey around them: the more rival hunters per prey animal in
+      // sight, the less likely a conception (packmates count less). Predator numbers follow their prey.
+      let rivals = 0, prey = 0;
+      for (const o of nb) {
+        if (o === c) continue;
+        if (o.hunter) rivals += o.sp === c.sp ? 1 - 0.7 * soc : 1;
+        else if (o.m < c.m * 2.5) prey++;
+      }
+      const meaty = clamp((c.g[G.diet] - HUNT_DIET) / 0.4, 0, 1);   // omnivores live partly on plants
+      c.breedOdds = 1 - meaty * (1 - 1 / (1 + 2 * rivals / (prey + 2)));
     }
     if (ready) {
       if (this.params.sexual) {
@@ -1330,10 +1556,14 @@ class Simulation {
     }
 
     // ---- Food
-    if (hungerFrac < 0.9) {
+    if (hungerFrac < Math.max(0.9, c.breedAt + 0.03)) {   // keep eating until a baby is affordable
+      // Every option is scored in expected energy per second over the whole episode (walk or chase, eat),
+      // so omnivores hunt or scavenge whenever that pays better than grazing
       let bestV = 0, choice = null;
+      const room = c.maxE - c.energy;
+      const eatRate = 30 * c.m ** 0.75 * c.meatEff;      // meat energy per second while eating a carcass
       // Live prey
-      if (c.meatEff > 0.3 && c.giveUpT <= 0 && hungerFrac < 0.75) {   // sated predators don't hunt
+      if (c.hunter && c.giveUpT <= 0 && hungerFrac < 0.8) {   // sated predators don't hunt
         for (const o of nb) {
           if (o === c || !o.alive) continue;
           // No cannibalism among similar kin, but a meat-eater may prey on plant-eating relatives:
@@ -1347,27 +1577,31 @@ class Simulation {
           if (soc > 0.3 && kinHunting) for (const m of nb) if (m !== c && m.sp === c.sp && m.target === o) allies++;
           const atk = c.atk * (1 + 0.5 * soc * Math.min(allies, 3));
           const p = atk / (atk + o.def * o.ageMul) * evasionMul(c, o) * herdMul(o) * subdueMul(c, o, allies);
-          if (p < 0.3) continue;
+          if (p < 0.08) continue;                                         // hopeless
           const ok = this.cellAt(o.x, o.y);
           if (!this.reachable(c.access, k, ok)) continue;              // across a barrier I can't cross
           // Compare speeds on the ground each one is standing on (prey in water may outswim us)
           const myV = c.vmax * c.terrainMul[this.biome[k]];
           const itsV = o.vmax * o.ageMul * o.terrainMul[this.biome[ok]];
           const catchable = myV > itsV * 0.8 ? 1 : 0.4;
-          let v = (p * catchable * o.meat * c.meatEff) / (2 + d / c.vmax);
-          if (allies && soc > 0.4) v *= 1 + soc;                          // join the pack's hunt
+          // A couple of strikes, then eat until full; failed strikes cost bruises (big prey hits hard)
+          const win = catchable * (1 - (1 - p) * (1 - p));
+          const food = Math.min(o.meat * c.meatEff, room);
+          const bruise = (1 - p) * (3 * o.atk + 1) * Math.max(1, o.m / c.m);
+          const time = d / Math.max(4, myV - 0.6 * itsV) + 2 + food / eatRate;
+          let v = (win * food - bruise) / time;
+          if (allies && soc > 0.4) v *= 1 + 0.5 * soc;                  // join the pack's hunt
           if (v > bestV) { bestV = v; choice = { type: 'hunt', o }; }
         }
       }
-      // Carrion
-      if (c.meatEff > 0.12) {
+      // Carrion: a free meal for anyone who eats some meat (a stepping stone towards carnivory)
+      if (c.scavenger) {
         const cs = this.corpseHash.query(c.x, c.y, c.vision, this.tmp2, 20);
         for (const o of cs) {
           if (!this.reachable(c.access, k, this.cellAt(o.x, o.y))) continue;
           const d = Math.hypot(o.x - c.x, o.y - c.y);
-          // Energy per second while eating (like plants), discounted by the walk there. This makes
-          // scavenging a real stepping stone for omnivores on the way to carnivory.
-          const v = 6 * c.meatEff * 30 * c.m ** 0.75 * Math.min(1, o.meat / 10) / (1 + d / (c.vmax * 4));
+          const food = Math.min(o.meat * c.meatEff, room);
+          const v = food / (d / c.vmax + 1 + food / eatRate);
           if (v > bestV) { bestV = v; choice = { type: 'carrion', o }; }
         }
       }
@@ -1387,17 +1621,33 @@ class Simulation {
         if (pv.kind < 0) continue;
         const cx = ((cell % this.cols) + 0.5) * CELL, cy = (Math.floor(cell / this.cols) + 0.5) * CELL;
         const d = Math.hypot(cx - c.x, cy - c.y);
-        let v = pv.v / (1 + d / (c.vmax * 4));
+        // Energy per second over the walk there and the meal (a small patch far away isn't worth the trip)
+        const food = Math.min(pv.stock, room);
+        let v = food / (d / (c.vmax * 0.55) + food / pv.v);
         if (soc > 0.5 && kin) v /= 1 + (soc - 0.5) * 2 * Math.max(0, Math.hypot(cx - kx / kin, cy - ky / kin) - 40) / 100;  // near the herd
         if (v > bestCellV) { bestCellV = v; bestCell = cell; bestKind = pv.kind; }
       }
-      // Compare plant energy/sec against the rough energy/sec of meat options
-      const plantScore = bestCellV * 6;
-      if (choice && bestV > plantScore) {
+      // Hunt or scavenge when that beats the best grazing in sight
+      if (choice && bestV > bestCellV) {
         if (choice.type === 'hunt' && (c.state !== 'hunt' || c.target !== choice.o)) { c.chaseT = 0; c.stalkT = 0; c.striking = false; }
         c.state = choice.type; c.target = choice.o; c.sprint = choice.type === 'hunt';
         c.wantSpeed = c.vmax;
         return;
+      }
+      // A hunter with no prey in sight and little else to eat follows the scent of the nearest herds
+      if (c.hunter && !choice && hungerFrac < 0.8 && bestCellV < c.basal * (1 + 2 * c.meatEff)) {
+        const dest = this.scoutPrey(c, k);
+        if (dest) {
+          c.state = 'prowl'; c.target = null; c.sprint = false;
+          c.want = Math.atan2(dest.y - c.y, dest.x - c.x); c.wantSpeed = c.vmax * 0.6;
+          return;
+        }
+      }
+      // Nothing much in sight: head for greener pastures further away (the coarse food map)
+      if (hungerFrac < 0.8 && bestCellV < c.basal * 2) {
+        const far = this.scoutFood(c, k, Math.max(bestCellV * 1.5, c.basal * 0.6));
+        const kind = far >= 0 ? this.plantValue(c, far).kind : -1;
+        if (kind >= 0) { bestCell = far; bestKind = kind; bestCellV = c.basal; }
       }
       if (bestKind >= 0 && bestCellV > c.basal * 0.6) {   // only bother with plants worth digesting
         c.target = null;
@@ -1415,7 +1665,7 @@ class Simulation {
     } // End of the food branch
 
     // ---- Wander or prowl (drift towards milder temperatures when uncomfortable)
-    c.state = hungerFrac < 0.9 && c.meatEff > 0.3 ? 'prowl' : 'wander';
+    c.state = hungerFrac < 0.9 && c.hunter ? 'prowl' : 'wander';
     c.target = null; c.sprint = false;
     if (this.rng() < (c.state === 'prowl' ? 0.12 : 0.3)) c.want = c.heading + (this.rng() - 0.5) * 1.6;
     if (kin) {                                            // herd and pack animals keep together; loners keep apart
@@ -1509,12 +1759,12 @@ class Simulation {
     c.x = nx; c.y = ny;
     c.walk += v * dt / (c.r * 1.2);
     // Flying burns more energy per unit of speed; wading through water is tiring unless you swim or fly
-    c.moveCost = 0.6 * c.m * (c.speed / 25) ** 2 * (1 + 0.75 * c.fly)
+    c.moveCost = 0.6 * c.m ** 0.75 * (c.speed / 25) ** 2 * (1 + 0.75 * c.fly)   // big bodies travel cheaply per kilo
       + (bio === B.water ? 0.25 : bio === B.deep ? 0.8 : 0) * c.m * (1 - c.g[G.swim]) * (1 - c.fly);
   } // End of act()
 
   /**
-   * Eats from the plants in the current cell.
+   * Eats from the food (plants, bugs or fish) in the current cell.
    * @param {object} c - Creature.
    * @param {number} dt - Timestep.
    */
@@ -1527,10 +1777,9 @@ class Simulation {
     c.wantSpeed = 0;
     const amt = Math.min(arr[k], c.bite * c.rate[p] * dt);
     arr[k] -= amt;
-    const P = PLANTS[p];
-    const gain = amt * (P.energy * c.dig[p] - P.thorns * (1 - c.g[G.armor]));
+    const gain = amt * c.gain[p];
     c.energy = Math.min(c.maxE, c.energy + gain);
-    c.eatenPlant += gain > 0 ? gain : 0;
+    c.ate[p] += gain;
     if (c.energy >= c.maxE * 0.98) c.thinkT = 0;
   } // End of graze()
 
@@ -1545,7 +1794,7 @@ class Simulation {
     o.meat -= amt;
     const gain = amt * c.meatEff;
     c.energy = Math.min(c.maxE, c.energy + gain);
-    c.eatenMeat += gain;
+    c.ate[o.hunter === c.sp ? ATE_PREY : ATE_CARRION] += gain;    // its own (or its pack's) kill, or scavenged
     if (o.meat <= 0.5) o.alive = false;
     if (c.energy >= c.maxE * 0.98 || !o.alive) { c.target = null; c.state = 'wander'; c.thinkT = 0; }
   }
@@ -1572,6 +1821,7 @@ class Simulation {
     c.striking = false; c.stalkT = 0;
     if (this.rng() < p) {
       const corpse = this.kill(t, 'eaten');
+      corpse.hunter = c.sp;
       c.kills++;
       c.target = corpse; c.state = 'carrion'; c.sprint = false; c.chaseT = 0;
       this.events.push({ type: 'kill', x: t.x, y: t.y, t: this.time });
@@ -1597,7 +1847,9 @@ class Simulation {
     c.alive = false;
     c.cause = cause;
     this.stats[cause] = (this.stats[cause] || 0) + 1;
-    const corpse = { x: c.x, y: c.y, meat: c.meat + Math.max(0, c.energy) * 0.3, max: 0, alive: true, r: c.r, age: 0 };
+    // A fresh kill is a full meal; animals that died of hunger, cold or old age are skin and bones
+    const lean = cause === 'eaten' || cause === 'disaster' ? 1 : LEAN_CARCASS;
+    const corpse = { x: c.x, y: c.y, meat: c.meat * lean + Math.max(0, c.energy) * 0.3, max: 0, alive: true, r: c.r, age: 0 };
     corpse.max = corpse.meat;
     if (this.corpses.length < MAX_CORPSES) this.corpses.push(corpse);
     return corpse;
@@ -1645,10 +1897,15 @@ class Simulation {
     // The population cap is a safety limit, not biology: it prevents conceptions instead of wasting the mother's energy
     const pop = this.creatures.length + this.newborns.length;
     const room = pop > p.maxPop * 0.8 ? clamp((p.maxPop - pop) / (p.maxPop * 0.2), 0, 1) : 1;
-    const budget = mom.energy - mom.maxE * 0.3;
-    if (budget <= 0) return;
+    const reserve = mom.maxE * BIRTH_RESERVE;          // a mother never starves herself for a baby
     let born = 0;
+    if (this.rng() > (mom.breedOdds ?? 1)) {           // too many rival predators for the prey around: no conception
+      mom.cooldown = mom.cooldownBase; mom.lonely = 0;
+      if (dad) dad.cooldown = dad.cooldownBase * 0.5;
+      return;
+    }
     for (let i = 0; i < mom.litter; i++) {
+      if (this.rng() > room) continue;                                         // no room: not conceived
       const g = new Float32Array(NG);
       for (let j = 0; j < NG; j++) {
         let v = mom.g[j];
@@ -1664,12 +1921,13 @@ class Simulation {
       const a = this.rng() * Math.PI * 2;
       const baby = this.spawn(g, clamp(mom.x + Math.cos(a) * mom.r, 2, this.W - 2), clamp(mom.y + Math.sin(a) * mom.r, 2, this.H - 2), 0, mom);
       if (dad && dad.gen >= mom.gen) baby.gen = dad.gen + 1;
-      if (this.rng() > room) continue;                                         // no room: not conceived
-      const e = baby.maxE * mom.babyFrac;
-      if (born > 0 && (born + 1) * e * 1.2 > budget) break;
-      mom.energy -= e * 1.2;
+      // The mother invests a share of her own body's reserves. (Costing it by the baby's own genome would let small
+      // mutants slip through when big ones are unaffordable, and every lineage would shrink generation after generation.)
+      const e = mom.bodyE * mom.babyFrac;
+      if (mom.energy - e * BIRTH_COST < reserve) break;
+      mom.energy -= e * BIRTH_COST;
       if (this.rng() > viability) continue;                                    // miscarriage
-      baby.energy = e;
+      baby.energy = Math.min(baby.maxE, e);
       this.newborns.push(baby);
       born++;
       if (baby.gen > this.stats.maxGen) this.stats.maxGen = baby.gen;
@@ -1701,7 +1959,7 @@ class Simulation {
   speciesPass() {
     const T = this.params.speciesThreshold;
     const live = [];
-    for (const s of this.species.values()) if (!s.extinct) { s.count = 0; s.sum.fill(0); live.push(s); }
+    for (const s of this.species.values()) if (!s.extinct) { s.count = 0; s.sum.fill(0); s.ate.fill(0); live.push(s); }
     for (const c of this.creatures) {
       let s = this.species.get(c.sp);
       // Gradual turnover: once a species has a successor, members closer to it than to the ancestral mean
@@ -1729,6 +1987,7 @@ class Simulation {
       }
       s.count++;
       for (let i = 0; i < NG; i++) s.sum[i] += c.g[i];
+      for (let i = 0; i < ATE_N; i++) s.ate[i] += c.ate[i];
     } // End of the loop that assigns creatures to species
     const evolved = [];
     for (const s of live) {
@@ -1749,6 +2008,7 @@ class Simulation {
       if (s.count > s.peak) s.peak = s.count;
       if (!s.announced && s.count >= 10 && s.parent) { s.announced = true; this.note('newSpecies', { sp: s.id, parent: s.parent }); }
       if (s.count >= 10) s.announced = true;
+      if (s.count >= 10 && s.parent) this.checkMilestones(s);
     }
     for (const s of evolved) this.evolveInPlace(s);
   } // End of speciesPass()
@@ -1797,7 +2057,10 @@ class Simulation {
     name = name[0].toUpperCase() + name.slice(1);
     const s = {
       id, parent, name, born: this.time, died: -1, extinct: false, count: 0, lastCount: 0, peak: 0, announced: false,
-      proto: Float32Array.from(g), origin: Float32Array.from(g), sum: new Float32Array(NG),
+      proto: Float32Array.from(g), origin: Float32Array.from(g), sum: new Float32Array(NG), ate: new Float32Array(ATE_N),
+      // The founder this lineage descends from (its diet tells evolved meat eaters from founding hunters)
+      root: parent && this.species.get(parent) ? this.species.get(parent).root : id,
+      rootDiet: parent && this.species.get(parent) ? this.species.get(parent).rootDiet : g[G.diet],
       // Founders take their colour from the lineage gene; daughter species get a clearly different hue
       hue: parent && this.species.get(parent)
         ? (this.species.get(parent).hue + (anagenesis ? (r() < 0.5 ? -1 : 1) * (25 + 20 * r()) : 70 + r() * 220) + 360) % 360
@@ -1817,6 +2080,39 @@ class Simulation {
     this.log.push({ key, data, t: this.time });
     if (this.log.length > 80) this.log.shift();
   }
+
+  /**
+   * Field-note milestones: the first time an evolved species (10+ members) reaches a new way of life
+   * (eating meat, fishing, flying, giant size...), the log says so. Each milestone fires once per world.
+   * @param {object} s - Species with at least 10 members and a parent species.
+   */
+  checkMilestones(s) {
+    const g = s.proto, ms = this.milestones;
+    let tot = 0;
+    for (let i = 0; i < ATE_N; i++) tot += s.ate[i];
+    const share = (i) => (tot > 0 ? s.ate[i] / tot : 0);
+    const ph = { g: Float32Array.from(g) };
+    derive(ph);
+    const checks = [
+      ['mOmni', g[G.diet] >= 0.33 && s.rootDiet < 0.33],
+      ['mCarn', g[G.diet] >= 0.66 && s.rootDiet < 0.33],
+      ['mHunt', share(ATE_PREY) >= 0.35 && s.rootDiet < 0.5],
+      ['mBugs', share(F_BUGS) >= 0.35],
+      ['mFish', share(F_FISH) >= 0.35],
+      ['mScav', share(ATE_CARRION) >= 0.35],
+      ['mCactus', share(2) >= 0.3],
+      ['mFern', share(3) >= 0.3],
+      ['mFly', ph.fly >= 0.5],
+      ['mSwim', g[G.swim] >= 0.6],
+      ['mClimb', g[G.climb] >= 0.6],
+      ['mGiant', ph.m >= 3],
+      ['mCold', g[G.coat] >= 0.8],
+      ['mHeat', g[G.coat] <= 0.15],
+    ];
+    for (const [key, ok] of checks) {
+      if (ok && !ms[key]) { ms[key] = true; this.note(key, { sp: s.id }); }
+    }
+  } // End of checkMilestones()
 
   /**
    * Records a history sample: species counts and trait percentiles.
@@ -1839,10 +2135,17 @@ class Simulation {
     }
     let plantSum = 0;
     this.capSum = 0;
-    for (let p = 0; p < NP; p++) for (const k of this.growCells) { plantSum += this.plants[p][k]; this.capSum += this.caps[p][k]; }
+    for (let p = 0; p < NP; p++) for (const k of this.growLists[p]) { plantSum += this.plants[p][k]; this.capSum += this.caps[p][k]; }
     let herb = 0, omni = 0, carn = 0;
     for (const c of this.creatures) { const d = c.g[G.diet]; if (d < 0.33) herb++; else if (d < 0.66) omni++; else carn++; }
-    this.history.push({ t: this.time, n, counts, q, plants: plantSum / (this.capSum || 1), herb, omni, carn });  // plants = share of total capacity
+    // Ways of life: how many creatures live mainly on each food source (newborns that have hardly eaten don't count)
+    const diets = new Uint16Array(ATE_N);
+    for (const c of this.creatures) {
+      let best = -1, bv = 2;
+      for (let i = 0; i < ATE_N; i++) if (c.ate[i] > bv) { bv = c.ate[i]; best = i; }
+      if (best >= 0) diets[best]++;
+    }
+    this.history.push({ t: this.time, n, counts, q, plants: plantSum / (this.capSum || 1), herb, omni, carn, diets });  // plants = share of total capacity
     if (this.history.length > HISTORY_MAX) {
       // Thin out old samples instead of dropping them, so the long-term picture survives
       const kept = [];
@@ -1903,7 +2206,7 @@ class Simulation {
     for (const c of this.creatures) {
       if (c.alive && Math.hypot(c.x - x, c.y - y) < r) { this.kill(c, 'disaster'); killed++; }
     }
-    this.forCellsInRadius(x, y, r, (k, f) => { for (let p = 0; p < NP; p++) this.plants[p][k] *= 1 - f; });
+    this.forCellsInRadius(x, y, r, (k, f) => { for (let p = 0; p < NF; p++) this.plants[p][k] *= 1 - f; });
     this.events.push({ type: 'meteor', x, y, r, t: this.time });
     this.note('meteor', { n: killed });
   }
@@ -1918,7 +2221,7 @@ class Simulation {
     this.forCellsInRadius(x, y, r, (k) => {
       const b = this.biome[k];
       if (b === B.water || b === B.deep) return;            // nothing grows under water
-      for (let p = 0; p < NP; p++) this.plants[p][k] = Math.max(this.plants[p][k], this.caps[p][k]);
+      for (let p = 0; p < NF; p++) this.plants[p][k] = Math.max(this.plants[p][k], this.caps[p][k]);
       if (b !== B.shelf && this.plants[0][k] < 0.5) this.plants[0][k] = 0.5;
     });
     this.events.push({ type: 'bloom', x, y, r, t: this.time });
@@ -1994,6 +2297,7 @@ class Simulation {
 // ---------- App state ----------
 const $ = (id) => document.getElementById(id);
 const params = { ...DEFAULT_PARAMS };
+readWorldFromUrl();
 const view = {
   paused: false, simSpeed: 1, color: 'natural', plantGlyphs: true, bursts: true, corpses: true,
   tool: 'inspect', chart: 'pop', axisX: 'diet', axisY: 'size', focusSpecies: 0,
@@ -2003,6 +2307,7 @@ const COLOR_MODES = ['natural', 'species', 'diet', 'size', 'speed', 'strength', 
   'swim', 'climb', 'wings', 'social', 'stalk', 'energy', 'age'];
 const TRAIT_GENES = GENES.filter((k) => k !== 'hue');
 const sim = new Simulation(params);
+window.evo = { sim, params, view };   // console hook for the curious: e.g. evo.sim.creatures.length
 
 // ---------- Translations (English / Spanish) ----------
 const STRINGS = {
@@ -2010,7 +2315,7 @@ const STRINGS = {
     title: 'Evolution!', running: 'Running', paused: 'Paused', collapse: 'Collapse details', expand: 'Show details', langBtn: 'Español',
     creatures: 'Creatures', speciesN: 'Species', generation: 'Generation', plantsN: 'Plants',
     guildsTitle: 'Herbivores · omnivores · carnivores',
-    chartType: 'Chart type', chartPop: 'Population', chartTraits: 'Traits', chartMorpho: 'Morphospace', chartTree: 'Tree',
+    chartType: 'Chart type', chartPop: 'Population', chartDiet: 'Diets', chartTraits: 'Traits', chartMorpho: 'Morphospace', chartTree: 'Tree',
     axisX: 'Trait (horizontal)', axisY: 'Trait (vertical)', chartAria: 'Evolution chart',
     events: 'Field notes', speciesTitle: 'Living species', energy: 'Energy', follow: 'Follow', unfollow: 'Stop following',
     cloneTool: 'Introduce copies…', close: 'Close', worldAria: 'Map of the evolving world', minimapAria: 'Minimap: click to jump',
@@ -2052,7 +2357,7 @@ const STRINGS = {
       endurance: 'Purple stripes. Longer sprints and bigger fat reserves. Hunters with stamina run prey to exhaustion.',
       sense: 'Big eyes and antennae. Sees food, mates and danger from afar.',
       camo: 'Drab, mottled skin. Predators and prey notice it late.',
-      diet: 'Body colour: green eats plants → yellow → red eats meat.',
+      diet: 'Body colour: green eats plants → yellow → red eats meat (bugs, fish, carcasses and prey). Partial meat eaters scavenge and catch bugs; from about a third meat they hunt too.',
       plants: 'Belly badge: slices show which plants its gut digests.',
       coat: 'White fluffy fur and a round, compact body = cold-adapted · big orange ears = heat-adapted.',
       fertility: 'White spots = babies per litter. Many babies get less energy each.',
@@ -2063,12 +2368,15 @@ const STRINGS = {
       stalk: 'Whiskers. High: hunters creep up unseen and ambush from close range, but hunts are slow. Low: they chase prey down with speed and stamina.',
       hue: 'Tail colour marks the species (lineage). Zoomed out, each creature becomes a dot of this colour.',
     },
-    plants: { grass: 'Grass', berry: 'Berry bushes', cactus: 'Cactus', fern: 'Toxic ferns' },
+    plants: { grass: 'Grass', berry: 'Berry bushes', cactus: 'Cactus', fern: 'Toxic ferns', bugs: 'Bugs', fish: 'Fish' },
+    dietTitle: 'Eats', dietNone: 'nothing yet',
+    dietSrc: { grass: 'grass', berry: 'berries', cactus: 'cactus', fern: 'ferns', bugs: 'bugs', fish: 'fish', prey: 'prey', carrion: 'carrion' },
     shapeNote: 'Body shape: long and slim = fast · boxy = armoured · wedge = strong jaws · round = cold-adapted and slow.',
     terrainNote: 'Terrain: water and marsh slow walkers down (swimmers glide through), grey mountains are cold and steep (climbers cope). Dark-blue oceans split the continents and surround islands: only good swimmers or fliers cross them, except over the land bridges an ice age exposes. Red-brown cliffs ring lush mesas: only good climbers or fliers get up.',
     plantHelp: {
-      grass: 'grows fast, poor food', berry: 'rich, gone in winter, tall creatures reach it best',
-      cactus: 'desert; tough & thorny: needs jaws and armour', fern: 'wetlands; poisonous unless specialised',
+      grass: 'grows fast, poor food', berry: 'rich, gone in winter; tall animals, climbers and fliers reach it',
+      cactus: 'desert; tough & thorny: jaws and armour help', fern: 'wetlands; toxic: only a fern-specialised gut gets much out of it',
+      bugs: 'swarm in warm, wet places; small, quick meat eaters catch them', fish: 'rivers, lakes and the sea; waders snatch a few, swimmers catch many',
     },
     states: { wander: 'wandering', prowl: 'prowling', graze: 'grazing', forage: 'foraging', hunt: 'hunting', carrion: 'eating', flee: 'fleeing', mate: 'courting', disperse: 'dispersing', stalk: 'stalking' },
     modes: { natural: 'Natural look', species: 'Species' },
@@ -2089,15 +2397,22 @@ const STRINGS = {
       extinct: '💀 {name} went extinct (peak {peak}).', iceAge: '❄️ An ice age begins.', heatWave: '🔥 A heat wave begins.',
       drought: '🏜️ A drought withers the plants.', meteor: '☄️ Meteor strike: {n} killed.', plague: '🦠 Plague hits {name}: {n} died.',
       rescued: '🌱 Life was reseeded after total extinction.', introduced: '🧬 {n} newcomers introduced.',
-      noHunters: '⚠️ No meat-eaters left. Try 🧬 to introduce hunters.',
+      noHunters: '⚠️ The meat-eaters have died out. They may evolve again from plant eaters, or try 🧬 to introduce hunters.',
       evolved: '🧬 {parent} has evolved into {name} ({diff}).',
-      bridgeOpen: '🌉 The sea has dropped: land bridges now join the continents.',
-      bridgeClosed: '🌊 The sea has risen again: the continents are cut off.',
+      bridgeOpen: '🌉 The sea has dropped: land bridges have opened across the shallow straits.',
+      bridgeClosed: '🌊 The sea has risen again: the land bridges are gone.',
+      mOmni: '🍖 {name} has started eating meat: the first omnivores!', mCarn: '🥩 {name}: true carnivores have evolved from plant eaters!',
+      mHunt: '🐺 {name} lives by hunting other animals.', mBugs: '🐜 {name} lives mostly on bugs.', mFish: '🐟 {name} has learned to fish.',
+      mScav: '🦴 {name} lives mostly on carrion.', mCactus: '🌵 {name} has learned to eat cactus.', mFern: '🌿 {name} can now digest the toxic ferns.',
+      mFly: '🪶 {name} has taken to the air.', mSwim: '🌊 {name} has taken to the water.', mClimb: '⛰️ {name} has become a nimble climber.',
+      mGiant: '🐘 {name} has grown to giant size.', newWorld: '🌍 A new world is born: {type}.', mCold: '❄️ {name} has adapted to the cold.', mHeat: '☀️ {name} has adapted to the heat.',
     },
     controls: 'Controls', fSim: 'Simulation', fWorld: 'World (applies on restart)', fEvo: 'Evolution', fEnv: 'Environment', fEvents: 'Events', fView: 'View',
-    pausedCtl: 'Paused (Space)', speedCtl: 'Speed ×', step: 'Step 1 second', restart: '↺ Restart', worldSize: 'World size',
+    pausedCtl: 'Paused (Space)', speedCtl: 'Speed ×', step: 'Step 1 second', restart: '↺ Restart', newWorld: '🎲 New world', worldSize: 'World size', worldType: 'Kind of world',
+    worldTypes: { continents: 'Continents', pangaea: 'Pangaea (one landmass)', archipelago: 'Archipelago', wetlands: 'Wetlands',
+      drylands: 'Drylands', frozen: 'Frozen world', surprise: '🎲 Surprise me' },
     sizes: { Small: 'Small', Medium: 'Medium', Large: 'Large', Huge: 'Huge' }, seed: 'Random seed', scenario: 'Starting life',
-    scenarios: { twoFounders: 'Grazers + hunters', single: 'One grazer ancestor', random: 'Random soup' }, startCount: 'Starting creatures',
+    scenarios: { twoFounders: 'Grazers + hunters', single: 'One grazer ancestor', random: 'Random soup' }, startCount: 'Starting creatures (Large world)',
     mutationRate: 'Mutation chance', mutationSize: 'Mutation size', speciesThreshold: 'Species distance', sexual: 'Sexual reproduction',
     plantGrowth: 'Plant growth', climate: 'Climate (cold ↔ hot)', seasons: 'Seasons', maxPop: 'Population cap', rescue: 'Reseed if all die',
     evIce: '❄️ Ice age (5 min, sea drops)', evHeat: '🔥 Heat wave (90 s)', evDrought: '🏜️ Drought (60 s)', evPlague: '🦠 Plague', evMeteors: '☄️ Meteor shower',
@@ -2110,7 +2425,7 @@ const STRINGS = {
     title: '¡Evolución!', running: 'En marcha', paused: 'En pausa', collapse: 'Ocultar detalles', expand: 'Mostrar detalles', langBtn: 'English',
     creatures: 'Criaturas', speciesN: 'Especies', generation: 'Generación', plantsN: 'Plantas',
     guildsTitle: 'Herbívoros · omnívoros · carnívoros',
-    chartType: 'Tipo de gráfico', chartPop: 'Población', chartTraits: 'Rasgos', chartMorpho: 'Morfoespacio', chartTree: 'Árbol',
+    chartType: 'Tipo de gráfico', chartPop: 'Población', chartDiet: 'Dietas', chartTraits: 'Rasgos', chartMorpho: 'Morfoespacio', chartTree: 'Árbol',
     axisX: 'Rasgo (horizontal)', axisY: 'Rasgo (vertical)', chartAria: 'Gráfico de la evolución',
     events: 'Cuaderno de campo', speciesTitle: 'Especies vivas', energy: 'Energía', follow: 'Seguir', unfollow: 'Dejar de seguir',
     cloneTool: 'Introducir copias…', close: 'Cerrar', worldAria: 'Mapa del mundo en evolución', minimapAria: 'Minimapa: haz clic para saltar',
@@ -2152,7 +2467,7 @@ const STRINGS = {
       endurance: 'Rayas moradas. Carreras más largas y más reservas de grasa. Las cazadoras con aguante agotan a sus presas.',
       sense: 'Ojos grandes y antenas. Ve comida, pareja y peligros desde lejos.',
       camo: 'Piel apagada y moteada. Depredadores y presas lo notan tarde.',
-      diet: 'Color del cuerpo: verde come plantas → amarillo → rojo come carne.',
+      diet: 'Color del cuerpo: verde come plantas → amarillo → rojo come carne (bichos, peces, cadáveres y presas). Quien come algo de carne carroñea y caza bichos; a partir de un tercio de carne, también caza.',
       plants: 'Insignia del vientre: las porciones muestran qué plantas digiere.',
       coat: 'Pelo blanco y esponjoso y cuerpo redondo y compacto = adaptado al frío · orejas naranjas grandes = adaptado al calor.',
       fertility: 'Manchas blancas = crías por camada. Muchas crías reciben menos energía cada una.',
@@ -2163,12 +2478,15 @@ const STRINGS = {
       stalk: 'Bigotes. Alto: cazadoras que se acercan sin ser vistas y emboscan de cerca, aunque cazan despacio. Bajo: persiguen a la presa con velocidad y aguante.',
       hue: 'El color de la cola indica la especie (linaje). Con el zoom alejado, cada criatura es un punto de ese color.',
     },
-    plants: { grass: 'Hierba', berry: 'Arbustos de bayas', cactus: 'Cactus', fern: 'Helechos tóxicos' },
+    plants: { grass: 'Hierba', berry: 'Arbustos de bayas', cactus: 'Cactus', fern: 'Helechos tóxicos', bugs: 'Bichos', fish: 'Peces' },
+    dietTitle: 'Come', dietNone: 'nada aún',
+    dietSrc: { grass: 'hierba', berry: 'bayas', cactus: 'cactus', fern: 'helechos', bugs: 'bichos', fish: 'peces', prey: 'presas', carrion: 'carroña' },
     shapeNote: 'Forma del cuerpo: larga y estilizada = rápida · cuadrada = acorazada · en cuña = mandíbulas fuertes · redonda = adaptada al frío y lenta.',
     terrainNote: 'Terreno: el agua y el pantano frenan a quien camina (quien nada los cruza rápido) y las montañas grises son frías y empinadas (quien trepa se apaña). Los océanos azul oscuro separan continentes y rodean islas: solo los buenos nadadores o voladores los cruzan, salvo por los puentes de tierra que deja una glaciación. Acantilados rojizos rodean mesetas frondosas: solo suben los buenos escaladores o voladores.',
     plantHelp: {
-      grass: 'crece rápido, poco nutritiva', berry: 'nutritivas, desaparecen en invierno, mejor para criaturas altas',
-      cactus: 'desierto; duro y con espinas: pide mandíbulas y coraza', fern: 'humedales; venenoso salvo para especialistas',
+      grass: 'crece rápido, poco nutritiva', berry: 'nutritivas, desaparecen en invierno; las alcanzan las criaturas altas, las que trepan y las que vuelan',
+      cactus: 'desierto; duro y con espinas: ayudan las mandíbulas y la coraza', fern: 'humedales; tóxico: solo un estómago especializado le saca provecho',
+      bugs: 'abundan en sitios cálidos y húmedos; los cazan los carnívoros pequeños y rápidos', fish: 'ríos, lagos y el mar; quien vadea atrapa alguno, quien nada atrapa muchos',
     },
     states: { wander: 'paseando', prowl: 'merodeando', graze: 'pastando', forage: 'buscando comida', hunt: 'cazando', carrion: 'comiendo', flee: 'huyendo', mate: 'cortejando', disperse: 'emigrando', stalk: 'acechando' },
     modes: { natural: 'Aspecto natural', species: 'Especie' },
@@ -2189,15 +2507,22 @@ const STRINGS = {
       extinct: '💀 {name} se ha extinguido (máximo {peak}).', iceAge: '❄️ Empieza una glaciación.', heatWave: '🔥 Empieza una ola de calor.',
       drought: '🏜️ Una sequía marchita las plantas.', meteor: '☄️ Impacto de meteorito: {n} muertos.', plague: '🦠 Una plaga golpea a {name}: {n} muertos.',
       rescued: '🌱 La vida se ha resembrado tras la extinción total.', introduced: '🧬 Se han introducido {n} recién llegados.',
-      noHunters: '⚠️ No quedan carnívoros. Prueba 🧬 para introducir cazadores.',
+      noHunters: '⚠️ Los carnívoros se han extinguido. Pueden volver a evolucionar a partir de los herbívoros, o prueba 🧬 para introducir cazadores.',
       evolved: '🧬 {parent} ha evolucionado hasta convertirse en {name} ({diff}).',
-      bridgeOpen: '🌉 El mar ha bajado: ahora hay puentes de tierra entre los continentes.',
-      bridgeClosed: '🌊 El mar ha vuelto a subir: los continentes quedan aislados.',
+      bridgeOpen: '🌉 El mar ha bajado: se han abierto puentes de tierra en los estrechos poco profundos.',
+      bridgeClosed: '🌊 El mar ha vuelto a subir: los puentes de tierra han desaparecido.',
+      mOmni: '🍖 {name} ha empezado a comer carne: ¡los primeros omnívoros!', mCarn: '🥩 {name}: ¡han evolucionado carnívoros de verdad a partir de herbívoros!',
+      mHunt: '🐺 {name} vive de cazar a otros animales.', mBugs: '🐜 {name} vive sobre todo de bichos.', mFish: '🐟 {name} ha aprendido a pescar.',
+      mScav: '🦴 {name} vive sobre todo de carroña.', mCactus: '🌵 {name} ha aprendido a comer cactus.', mFern: '🌿 {name} ya digiere los helechos tóxicos.',
+      mFly: '🪶 {name} ha echado a volar.', mSwim: '🌊 {name} se ha lanzado al agua.', mClimb: '⛰️ {name} trepa con soltura.',
+      mGiant: '🐘 {name} ha alcanzado un tamaño gigante.', newWorld: '🌍 Nace un mundo nuevo: {type}.', mCold: '❄️ {name} se ha adaptado al frío.', mHeat: '☀️ {name} se ha adaptado al calor.',
     },
     controls: 'Controles', fSim: 'Simulación', fWorld: 'Mundo (se aplica al reiniciar)', fEvo: 'Evolución', fEnv: 'Entorno', fEvents: 'Sucesos', fView: 'Vista',
-    pausedCtl: 'En pausa (Espacio)', speedCtl: 'Velocidad ×', step: 'Avanzar 1 segundo', restart: '↺ Reiniciar', worldSize: 'Tamaño del mundo',
+    pausedCtl: 'En pausa (Espacio)', speedCtl: 'Velocidad ×', step: 'Avanzar 1 segundo', restart: '↺ Reiniciar', newWorld: '🎲 Mundo nuevo', worldSize: 'Tamaño del mundo', worldType: 'Tipo de mundo',
+    worldTypes: { continents: 'Continentes', pangaea: 'Pangea (un solo continente)', archipelago: 'Archipiélago', wetlands: 'Humedales',
+      drylands: 'Tierras secas', frozen: 'Mundo helado', surprise: '🎲 Sorpréndeme' },
     sizes: { Small: 'Pequeño', Medium: 'Mediano', Large: 'Grande', Huge: 'Enorme' }, seed: 'Semilla aleatoria', scenario: 'Vida inicial',
-    scenarios: { twoFounders: 'Herbívoros + cazadores', single: 'Un único antepasado herbívoro', random: 'Sopa aleatoria' }, startCount: 'Criaturas iniciales',
+    scenarios: { twoFounders: 'Herbívoros + cazadores', single: 'Un único antepasado herbívoro', random: 'Sopa aleatoria' }, startCount: 'Criaturas iniciales (mundo grande)',
     mutationRate: 'Probabilidad de mutación', mutationSize: 'Tamaño de mutación', speciesThreshold: 'Distancia entre especies', sexual: 'Reproducción sexual',
     plantGrowth: 'Crecimiento de plantas', climate: 'Clima (frío ↔ calor)', seasons: 'Estaciones', maxPop: 'Límite de población', rescue: 'Resembrar si todo muere',
     evIce: '❄️ Glaciación (5 min, baja el mar)', evHeat: '🔥 Ola de calor (90 s)', evDrought: '🏜️ Sequía (60 s)', evPlague: '🦠 Plaga', evMeteors: '☄️ Lluvia de meteoritos',
@@ -2246,8 +2571,8 @@ const INK = '#1c1a2e';
 /** Colours used for trait bars in the inspector (match the body parts that show each trait). */
 const TRAIT_COLORS = {
   size: '#7b7f8c', speed: '#2b8cff', strength: '#6b3a1f', armor: '#4a5468', endurance: '#7b45b8', sense: '#e0a800',
-  camo: '#7a7a3a', grass: rgb(PLANTS[0].color), berry: rgb(PLANTS[1].color), cactus: rgb(PLANTS[2].color),
-  fern: rgb(PLANTS[3].color), coat: '#8fc3f0', fertility: '#ff8fb1', swim: '#1b8a8f', climb: '#3b2a20', wings: '#b9a8ff',
+  camo: '#7a7a3a', grass: rgb(FOODS[0].color), berry: rgb(FOODS[1].color), cactus: rgb(FOODS[2].color),
+  fern: rgb(FOODS[3].color), coat: '#8fc3f0', fertility: '#ff8fb1', swim: '#1b8a8f', climb: '#3b2a20', wings: '#b9a8ff',
   social: '#c77d2e', stalk: '#44403a',
 };
 const RAMP = [[49, 54, 149], [69, 117, 180], [116, 173, 209], [254, 224, 144], [244, 109, 67], [165, 0, 38]];
@@ -2632,7 +2957,7 @@ function drawCreature(ctx, c, x, y, h, o) {
     for (let k = 0; k < NP; k++) {
       const a1 = a0 + c.share[k] * Math.PI * 2;
       ctx.beginPath(); ctx.moveTo(cx, 0); ctx.arc(cx, 0, R, a0, a1); ctx.closePath();
-      ctx.fillStyle = rgb(PLANTS[k].color); ctx.fill();
+      ctx.fillStyle = rgb(FOODS[k].color); ctx.fill();
       a0 = a1;
     }
     ctx.beginPath(); ctx.arc(cx, 0, R, 0, Math.PI * 2); ctx.strokeStyle = INK; ctx.lineWidth = lw * 0.8; ctx.stroke();
@@ -2798,7 +3123,7 @@ function initTerrain() {
  */
 function updateTerrain() {
   const n = sim.cols * sim.rows;
-  const pcol = PLANTS.map((p) => mix(p.color, [30, 40, 20], 0.12));
+  const pcol = FOODS.map((p) => mix(p.color, [30, 40, 20], 0.12));
   for (let k = 0; k < n; k++) {
     const b = sim.biome[k];
     let c = BIOMES[b].ground;
@@ -2851,13 +3176,42 @@ function h01(k, p) {
 }
 
 /**
- * Draws small plant glyphs (tufts, bushes, cacti, ferns) on the visible cells when zoomed in.
+ * Draws a little fish in some water cells (more where fish abound); they sway a little.
+ * @param {number} k - Cell index.
+ * @param {number} i - Cell column.
+ * @param {number} j - Cell row.
+ * @param {number} a - Fish biomass in the cell.
+ * @param {number} lw - Line width (world units).
+ * @param {number} now - Timestamp in ms (for the sway).
+ */
+function drawFishGlyph(k, i, j, a, lw, now) {
+  if (h01(k, 77) > Math.min(0.55, a * 2.5)) return;      // a fish in some cells (more of them where fish abound)
+  for (let q = 0; q < 1; q++) {
+    const ang = h01(k, 20 + q) * Math.PI * 2 + Math.sin(now * 0.0015 + k) * 0.4;
+    const gx = (i + 0.2 + 0.6 * h01(k, 30 + q)) * CELL, gy = (j + 0.2 + 0.6 * h01(k, 40 + q)) * CELL;
+    const L = 1.6 + 1.2 * Math.min(1, a / 0.25);
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    ctx.beginPath();
+    ctx.ellipse(gx, gy, L, L * 0.42, ang, 0, Math.PI * 2);
+    ctx.moveTo(gx - ca * L * 0.8, gy - sa * L * 0.8);
+    ctx.lineTo(gx - ca * L * 1.6 + sa * L * 0.5, gy - sa * L * 1.6 - ca * L * 0.5);
+    ctx.lineTo(gx - ca * L * 1.6 - sa * L * 0.5, gy - sa * L * 1.6 + ca * L * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(214,232,246,0.7)'; ctx.fill();
+    ctx.lineWidth = lw * 0.7; ctx.strokeStyle = 'rgba(28,26,46,0.45)'; ctx.stroke();
+  }
+} // End of drawFishGlyph()
+
+/**
+ * Draws small food glyphs on the visible cells when zoomed in: plant tufts, bushes, cacti and ferns,
+ * crawling bugs, and fish in the water.
  * @param {number} x0 - Visible world left.
  * @param {number} y0 - Visible world top.
  * @param {number} x1 - Visible world right.
  * @param {number} y1 - Visible world bottom.
+ * @param {number} now - Timestamp in ms (bugs crawl, fish sway).
  */
-function drawPlantGlyphs(x0, y0, x1, y1) {
+function drawPlantGlyphs(x0, y0, x1, y1, now) {
   const i0 = clamp(Math.floor(x0 / CELL), 0, sim.cols - 1), i1 = clamp(Math.floor(x1 / CELL), 0, sim.cols - 1);
   const j0 = clamp(Math.floor(y0 / CELL), 0, sim.rows - 1), j1 = clamp(Math.floor(y1 / CELL), 0, sim.rows - 1);
   const lw = 1.1 / cam.zoom;
@@ -2866,13 +3220,18 @@ function drawPlantGlyphs(x0, y0, x1, y1) {
     for (let i = i0; i <= i1; i++) {
       const k = j * sim.cols + i;
       const bk = sim.biome[k];
-      if (bk === B.water || bk === B.deep || bk === B.shelf) continue;
+      if (bk === B.water || bk === B.deep) {
+        const a = sim.plants[F_FISH][k];
+        if (a > 0.05) drawFishGlyph(k, i, j, a, lw, now);
+        continue;
+      }
+      if (bk === B.shelf) continue;
       for (let p = 0; p < NP; p++) {
         const a = sim.plants[p][k];
         if (a < (p === 2 ? 0.3 : 0.18)) continue;
         const gx = (i + 0.2 + 0.6 * h01(k, p)) * CELL, gy = (j + 0.2 + 0.6 * h01(k, p + 7)) * CELL;
         const s = (p === 2 ? 1.6 : 2) + 3.2 * Math.min(1, a);
-        const col = PLANTS[p].color;
+        const col = FOODS[p].color;
         ctx.lineWidth = lw * 1.4;
         if (p === 0) {                                    // grass tuft
           ctx.strokeStyle = rgb(mix(col, [20, 60, 10], 0.35));
@@ -2907,6 +3266,26 @@ function drawPlantGlyphs(x0, y0, x1, y1) {
       } // End of the loop over plant types in a cell
     }
   } // End of the loops over visible cells
+  // Bugs: a few dark specks per cell that crawl about (one path for all of them)
+  ctx.beginPath();
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const k = j * sim.cols + i;
+      const a = sim.plants[F_BUGS][k];
+      if (a < 0.05) continue;
+      const n = Math.min(3, Math.ceil(a / 0.07));
+      for (let q = 0; q < n; q++) {
+        const t0 = now * 0.0007 + q * 2.1 + k * 0.37;
+        const bx = (i + 0.15 + 0.7 * h01(k, 50 + q)) * CELL + Math.sin(t0) * 1.6;
+        const by = (j + 0.15 + 0.7 * h01(k, 60 + q)) * CELL + Math.cos(t0 * 1.3) * 1.6;
+        const hx = Math.cos(t0) * 0.75, hy = -Math.sin(t0 * 1.3) * 0.75;   // head points where it crawls
+        ctx.moveTo(bx + 0.75, by); ctx.arc(bx, by, 0.75, 0, Math.PI * 2);
+        ctx.moveTo(bx + hx + 0.45, by + hy); ctx.arc(bx + hx, by + hy, 0.45, 0, Math.PI * 2);
+      }
+    }
+  } // End of the loops that place the bugs
+  ctx.fillStyle = 'rgba(52,34,24,0.85)';
+  ctx.fill();
 } // End of drawPlantGlyphs()
 
 // ---------- Visual effects ----------
@@ -2978,7 +3357,7 @@ function render(alpha, dt, now) {
   ctx.drawImage(terrainCv, 0, 0, sim.cols * CELL, sim.rows * CELL);
   ctx.lineWidth = 3 / cam.zoom; ctx.strokeStyle = INK;
   ctx.strokeRect(0, 0, sim.W, sim.H);
-  if (view.plantGlyphs && cam.zoom > 1.4) drawPlantGlyphs(x0, y0, x1, y1);
+  if (view.plantGlyphs && cam.zoom > 1.4) drawPlantGlyphs(x0, y0, x1, y1, now);
 
   // Carcasses
   if (view.corpses && cam.zoom > 0.8) {
@@ -3022,9 +3401,13 @@ function render(alpha, dt, now) {
       ctx.fillStyle = view.color === 'natural' ? fill : speciesCSS(c.sp); ctx.fill();
     } else {
       const h = c.ph + wrapAngle(c.heading - c.ph) * alpha;
-      drawCreature(ctx, c, x, y, h, {
-        px: pxw, fill, tail: speciesCSS(c.sp), walk: c.walk, energyFrac: clamp(c.energy / c.maxE, 0, 1),
+      // Youngsters are drawn smaller and grow up to full size as they mature (display only)
+      const grow = c.age < c.matureAge ? 0.6 + 0.4 * c.age / c.matureAge : 1;
+      ctx.save(); ctx.translate(x, y); ctx.scale(grow, grow);
+      drawCreature(ctx, c, 0, 0, h, {
+        px: pxw / grow, fill, tail: speciesCSS(c.sp), walk: c.walk, energyFrac: clamp(c.energy / c.maxE, 0, 1),
       });
+      ctx.restore();
       if (sr > 9 && c.state === 'hunt') {                    // hunting marker
         ctx.fillStyle = '#e0303a'; ctx.strokeStyle = INK; ctx.lineWidth = pxw;
         const my = y - c.r * 2.2, s = Math.max(c.r * 0.35, 3 * pxw);
@@ -3479,17 +3862,56 @@ function calendar() {
 }
 const SEASON_ICON = { spring: '🌱', summer: '☀️', autumn: '🍂', winter: '❄️' };
 
+/** Food sources in the order of a creature's `ate` record, with their colours in the "what it eats" bars. */
+const SOURCE_KEYS = [...FOODS.map((f) => f.key), 'prey', 'carrion'];
+const SOURCE_COLORS = [...FOODS.map((f) => rgb(f.color)), '#c0392b', '#8d8173'];
+
 /**
- * Short description of a species' way of life from its prototype genome.
+ * Fills a "what it eats" bar (one coloured segment per food source) and a short text with the main sources.
+ * @param {HTMLElement} bar - Bar element.
+ * @param {HTMLElement} txt - Text element.
+ * @param {Float32Array} ate - Energy eaten per source (see ATE_N).
+ */
+function renderMenu(bar, txt, ate) {
+  let tot = 0;
+  for (let i = 0; i < ATE_N; i++) tot += ate[i];
+  bar.innerHTML = '';
+  if (tot <= 0) { txt.textContent = t('dietNone'); return; }
+  const parts = [];
+  for (let i = 0; i < ATE_N; i++) {
+    const f = ate[i] / tot;
+    if (f < 0.01) continue;
+    const seg = document.createElement('i');
+    seg.style.width = (f * 100).toFixed(1) + '%';
+    seg.style.background = SOURCE_COLORS[i];
+    seg.title = `${t('dietSrc')[SOURCE_KEYS[i]]} ${Math.round(f * 100)}%`;
+    bar.append(seg);
+    parts.push([f, i]);
+  }
+  parts.sort((a, b) => b[0] - a[0]);
+  txt.textContent = parts.filter((x) => x[0] >= 0.05).slice(0, 4).map(([f, i]) => `${t('dietSrc')[SOURCE_KEYS[i]]} ${Math.round(f * 100)}%`).join(' · ');
+} // End of renderMenu()
+
+/**
+ * Short description of a species' way of life: its guild, what it mostly eats (from what its members have
+ * actually eaten, when known, otherwise from its gut) and icons for notable traits.
  * @param {Float32Array} g - Prototype genome.
+ * @param {Float32Array} [ate] - Energy its members have eaten per source.
  * @returns {string} Description.
  */
-function describe(g) {
+function describe(g, ate) {
   const parts = [t('guild')[guildOf(g[G.diet])]];
   const ph = phenotype(g);
-  if (g[G.diet] < 0.6) {
+  let tot = 0;
+  if (ate) for (let i = 0; i < ATE_N; i++) tot += ate[i];
+  if (tot > 0) {
+    const top = [];
+    for (let i = 0; i < ATE_N; i++) if (ate[i] / tot >= 0.2) top.push([ate[i], i]);
+    top.sort((a, b) => b[0] - a[0]);
+    if (top.length) parts.push(top.slice(0, 2).map(([, i]) => t('dietSrc')[SOURCE_KEYS[i]]).join(' + '));
+  } else if (g[G.diet] < 0.6) {
     const eats = [];
-    for (let k = 0; k < NP; k++) if (ph.share[k] > 0.3 && ph.dig[k] > 0) eats.push(t('plants')[PLANTS[k].key].toLowerCase());
+    for (let k = 0; k < NP; k++) if (ph.share[k] > 0.3 && ph.dig[k] > 0) eats.push(t('plants')[FOODS[k].key].toLowerCase());
     if (eats.length) parts.push(eats.join(' + '));
   }
   if (g[G.coat] > 0.72) parts.push('❄');
@@ -3501,7 +3923,7 @@ function describe(g) {
   if (g[G.swim] > 0.6) parts.push('🌊');
   if (g[G.climb] > 0.6) parts.push('⛰');
   return parts.join(' · ');
-}
+} // End of describe()
 
 /**
  * Explains how a species differs from its parent (the two biggest trait changes).
@@ -3534,11 +3956,12 @@ function logText(e) {
     if (k === 'parent') return par ? par.name : '?';
     if (k === 'peak') return sp ? sp.peak : '?';
     if (k === 'diff') return sp ? speciesDiff(sp, par && e.key === 'evolved' ? { proto: par.origin } : par) : '';
+    if (k === 'type') return t('worldTypes')[e.data.type] || e.data.type;
     return e.data[k] ?? '';
   });
 }
 
-let lastLogLen = -1, speciesIconsT = 0, huntersWarned = false, spCardT = -Infinity;
+let lastLogLen = -1, speciesIconsT = 0, huntersWarned = false, hadHunters = false, spCardT = -Infinity;
 let spListHeld = false, lastSpeciesOrder = '';
 /** Species-list buttons by species id; kept alive between refreshes so clicks are never lost. */
 const spButtons = new Map();
@@ -3563,11 +3986,14 @@ function updateStats() {
     $(id).textContent = n && v / n > 0.07 ? v : '';
   }
   const cal = calendar();
-  $('clock').textContent = `${fmtTime(sim.time)} · ${t('year', { n: cal.year })}${cal.season ? ' ' + SEASON_ICON[cal.season] : ''}`;
+  $('clock').textContent = `${fmtTime(sim.time)} · ${t('year', { n: cal.year })}${cal.season ? ' ' + SEASON_ICON[cal.season] : ''}`
+    + ` · ${(t('worldTypes')[sim.worldType] || '').replace(/\s*\(.*\)/, '')}`;
   $('clock').title = cal.season ? t('seasons')[cal.season] : '';
 
   // Warn once when all meat-eaters are gone
-  if (carn + omni === 0 && sim.time > 30 && !huntersWarned) { huntersWarned = true; sim.note('noHunters', {}); }
+  // Warn once when the meat-eaters that were there have all died out (not before any have evolved)
+  if (carn >= 5) hadHunters = true;
+  if (carn + omni === 0 && hadHunters && !huntersWarned) { huntersWarned = true; hadHunters = false; sim.note('noHunters', {}); }
   if (carn > 0) huntersWarned = false;
 
   const lastT = String(sim.log[sim.log.length - 1]?.t);
@@ -3578,7 +4004,8 @@ function updateStats() {
     $('log').innerHTML = '';
     for (const e of items) {
       const li = document.createElement('li');
-      li.className = e.key === 'extinct' || e.key === 'plague' || e.key === 'meteor' || e.key === 'noHunters' ? 'bad' : (e.key === 'newSpecies' || e.key === 'evolved' ? 'new' : '');
+      li.className = e.key === 'extinct' || e.key === 'plague' || e.key === 'meteor' || e.key === 'noHunters' ? 'bad'
+        : (e.key === 'newSpecies' || e.key === 'evolved' || /^m[A-Z]/.test(e.key) ? 'new' : '');
       const tm = document.createElement('time');
       tm.textContent = fmtTime(e.t);
       li.append(tm, document.createTextNode(logText(e)));
@@ -3653,7 +4080,7 @@ function updateSpeciesList(live) {
       nameEl.append(dot, document.createTextNode(x.name));
     }
     b.querySelector('.n').textContent = x.count;
-    b.querySelector('small').textContent = describe(x.proto);
+    b.querySelector('small').textContent = describe(x.proto, x.ate);
     if (redrawIcons || !b.iconDrawn) { b.iconDrawn = true; drawIcon(b.querySelector('canvas'), phenotype(x.proto), speciesCSS(x.id)); }
   } // End of the loop that refreshes each species button
 } // End of updateSpeciesList()
@@ -3689,7 +4116,7 @@ function refreshSpeciesCard() {
   nameEl.innerHTML = '';
   const dot = document.createElement('i'); dot.style.background = speciesCSS(s.id);
   nameEl.append(dot, document.createTextNode(s.name));
-  $('spMeta').textContent = describe(s.proto) + ' · ' + t('selStats', { v: ph.vmax.toFixed(0), s: ph.vision.toFixed(0), l: ph.litter });
+  $('spMeta').textContent = describe(s.proto, s.ate) + ' · ' + t('selStats', { v: ph.vmax.toFixed(0), s: ph.vision.toFixed(0), l: ph.litter });
   if ($('spIcon').dataset.sp !== String(s.id) || now - ($('spIcon').drawnAt || 0) > 4000) {
     $('spIcon').dataset.sp = s.id; $('spIcon').drawnAt = now;
     drawIcon($('spIcon'), ph, speciesCSS(s.id));
@@ -3714,6 +4141,7 @@ function refreshSpeciesCard() {
     d.append(l, b); box.append(d);
   }
   $('spFollow').disabled = $('spIntro').disabled = !n;
+  renderMenu($('spMenuBar'), $('spMenuTxt'), s.ate);
   // Trait bars: average (fill) and 10th–90th percentile range (shaded box)
   const tr = $('spTraits');
   if (tr.dataset.lang !== lang || !tr.children.length) {
@@ -3761,6 +4189,7 @@ function refreshSelection() {
   const ef = clamp(c.energy / c.maxE, 0, 1);
   $('selBar').style.width = (ef * 100).toFixed(0) + '%';
   $('selBar').style.background = rgb(gradient([[224, 48, 58], [240, 184, 41], [88, 184, 84]], ef));
+  renderMenu($('selMenuBar'), $('selMenuTxt'), c.ate);
   $('selFollow').textContent = follow === c ? t('unfollow') : t('follow');
   $('selSpecies').disabled = view.focusSpecies === c.sp;
   const tr = $('selTraits');
@@ -3855,6 +4284,7 @@ function drawChart() {
   chartCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
   chartCtx.clearRect(0, 0, CW, CH);
   if (view.chart === 'pop') drawPopChart();
+  else if (view.chart === 'diet') drawDietChart();
   else if (view.chart === 'traits') drawTraitChart();
   else if (view.chart === 'morpho') drawMorphoChart();
   else drawTreeChart();
@@ -3906,6 +4336,42 @@ function drawPopChart() {
   chartLabel(fmtTime(t1), CW - pad - 2, CH - 4, 'right');
   chartLabel(fmtTime(t0), pad + 2, CH - 4);
 } // End of drawPopChart()
+
+/**
+ * Ways of life over time: a stacked area of how many creatures live mainly on each food source (grass,
+ * berries, cactus, ferns, bugs, fish, prey, carrion), labelled at the right edge. New bands are new niches.
+ */
+function drawDietChart() {
+  const H = sim.history;
+  if (H.length < 2) return;
+  const pad = 4, w = CW - pad * 2 - 52, h = CH - 18, top0 = 14;
+  let maxN = 10;
+  for (const s of H) if (s.diets) { let tot = 0; for (const v of s.diets) tot += v; if (tot > maxN) maxN = tot; }
+  const t0 = H[0].t, t1 = H[H.length - 1].t || 1;
+  const X = (tt) => pad + ((tt - t0) / (t1 - t0 || 1)) * w;
+  const Y = (v) => top0 + h - (v / maxN) * (h - top0);
+  const step = Math.max(1, Math.floor(H.length / w));
+  const idx = [];
+  for (let i = 0; i < H.length; i += step) idx.push(i);
+  if (idx[idx.length - 1] !== H.length - 1) idx.push(H.length - 1);
+  const base = new Float32Array(idx.length);
+  const end = idx.length - 1;
+  for (let src = 0; src < ATE_N; src++) {
+    const top = idx.map((i, j) => base[j] + (H[i].diets ? H[i].diets[src] : 0));
+    if (top.every((v, j) => v === base[j])) continue;
+    chartCtx.beginPath();
+    for (let j = 0; j < idx.length; j++) chartCtx.lineTo(X(H[idx[j]].t), Y(top[j]));
+    for (let j = end; j >= 0; j--) chartCtx.lineTo(X(H[idx[j]].t), Y(base[j]));
+    chartCtx.closePath();
+    chartCtx.fillStyle = SOURCE_COLORS[src];
+    chartCtx.fill();
+    if (Y(base[end]) - Y(top[end]) > 9) chartLabel(t('dietSrc')[SOURCE_KEYS[src]], X(t1) + 4, (Y(base[end]) + Y(top[end])) / 2 + 3);
+    for (let j = 0; j < idx.length; j++) base[j] = top[j];
+  } // End of the loop over food sources
+  chartLabel(`${maxN} ${t('popAxis')}`, pad + 2, 12);
+  chartLabel(fmtTime(t1), pad + w, CH - 4, 'right');
+  chartLabel(fmtTime(t0), pad + 2, CH - 4);
+} // End of drawDietChart()
 
 /**
  * Trait over time: population 10–90% band and median, plus the mean of the top species.
@@ -4044,7 +4510,7 @@ function toggleLegend(show) {
   legendBuilt = lang;
   const pl = $('legendPlants');
   pl.innerHTML = '';
-  for (const p of PLANTS) {
+  for (const p of FOODS) {
     const s = document.createElement('span');
     const i = document.createElement('i'); i.style.background = rgb(p.color);
     const b = document.createElement('b'); b.textContent = t('plants')[p.key];
@@ -4098,12 +4564,41 @@ function optionsFrom(labels) {
   return o;
 }
 
+/** World settings that the address bar remembers, so a world can be bookmarked or shared (URL name → param). */
+const URL_KEYS = { seed: 'seed', size: 'worldSize', type: 'worldType', start: 'scenario' };
+
+/**
+ * Reads the world settings (seed, size, kind of world, starting life) from the address bar, if present.
+ */
+function readWorldFromUrl() {
+  let q;
+  try { q = new URLSearchParams(location.search); } catch (e) { return; }
+  const seed = parseInt(q.get('seed'), 10);
+  if (seed > 0) params.seed = seed;
+  if (Object.hasOwn(WORLD_SIZES, q.get('size'))) params.worldSize = q.get('size');
+  if (Object.hasOwn(WORLD_TYPES, q.get('type')) || q.get('type') === 'surprise') params.worldType = q.get('type');
+  if (['twoFounders', 'single', 'random'].includes(q.get('start'))) params.scenario = q.get('start');
+} // End of readWorldFromUrl()
+
+/**
+ * Writes the current world settings into the address bar (without reloading or adding history entries).
+ */
+function writeWorldToUrl() {
+  try {
+    const q = new URLSearchParams(location.search);
+    for (const [k, p] of Object.entries(URL_KEYS)) q.set(k, String(params[p]));
+    history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash);
+  } catch (e) { /* sandboxed page without history access: the world just isn't remembered */ }
+}
+
 /**
  * Restarts the simulation from the current world parameters.
  */
 function resetSim() {
-  selected = null; follow = null; view.focusSpecies = 0; huntersWarned = false;
+  selected = null; follow = null; view.focusSpecies = 0; huntersWarned = false; hadHunters = false;
+  $('selTraits').dataset.id = ''; $('spIcon').dataset.sp = '';   // creature and species ids start over
   effects.length = 0;
+  writeWorldToUrl();
   sim.reset();
   initTerrain();
   clearSpeciesList(); lastLogLen = -1; spCardT = -Infinity;
@@ -4121,6 +4616,7 @@ function buildGui() {
   const actions = {
     step: () => { for (let i = 0; i < 30; i++) sim.step(SIM_DT); },
     restart: resetSim,
+    newWorld: () => { params.seed = 1 + Math.floor(Math.random() * 9999); resetSim(); gui.controllersRecursive().forEach((c) => c.updateDisplay()); },
     iceAge: () => sim.startEffect('iceAge', 300),
     heatWave: () => sim.startEffect('heatWave', 90),
     drought: () => sim.startEffect('drought', 60),
@@ -4133,9 +4629,11 @@ function buildGui() {
   fSim.add(view, 'simSpeed', SPEEDS).name(t('speedCtl')).onChange(setSpeed);
   fSim.add(actions, 'step').name(t('step'));
   fSim.add(actions, 'restart').name(t('restart'));
+  fSim.add(actions, 'newWorld').name(t('newWorld'));
 
   const fWorld = gui.addFolder(t('fWorld'));
   fWorld.add(params, 'worldSize', optionsFrom(t('sizes'))).name(t('worldSize'));
+  fWorld.add(params, 'worldType', optionsFrom(t('worldTypes'))).name(t('worldType'));
   fWorld.add(params, 'scenario', optionsFrom(t('scenarios'))).name(t('scenario'));
   fWorld.add(params, 'startCount', 50, 1200, 10).name(t('startCount'));
   fWorld.add(params, 'seed', 1, 9999, 1).name(t('seed'));
